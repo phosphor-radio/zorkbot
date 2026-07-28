@@ -1,0 +1,17 @@
+services:
+  game:
+    build: ./game
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/saves:/data
+      - ./games/zork1.z3:/game/zork1.z3:ro
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
