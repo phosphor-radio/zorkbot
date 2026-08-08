@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	ErrTimeout   = errors.New("command timed out")
-	ErrNotReady  = errors.New("session not ready")
-	ErrBusy      = errors.New("session busy")
-	ErrNotAlive  = errors.New("session not alive")
+	ErrTimeout  = errors.New("command timed out")
+	ErrNotReady = errors.New("session not ready")
+	ErrBusy     = errors.New("session busy")
+	ErrNotAlive = errors.New("session not alive")
 )
 
 const (
@@ -28,20 +28,20 @@ const (
 )
 
 type Config struct {
-	EncrustedPath string
-	GameFile      string
-	SaveDir       string
+	EncrustedPath  string
+	GameFile       string
+	SaveDir        string
 	CommandTimeout time.Duration
 	IdleWait       time.Duration
 }
 
 type Session struct {
-	cfg      Config
-	cmd      *exec.Cmd
-	ptmx     *os.File
-	mu       sync.Mutex
-	started  time.Time
-	ready    bool
+	cfg     Config
+	cmd     *exec.Cmd
+	ptmx    *os.File
+	mu      sync.Mutex
+	started time.Time
+	ready   bool
 }
 
 type Manager struct {
