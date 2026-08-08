@@ -1,0 +1,52 @@
+---
+description: Repository development workflow, docs layout, and git conventions
+alwaysApply: true
+---
+
+# Zorkbot Development Workflow
+
+## Documentation
+
+- Put specs, planning, and project docs under `docs/`.
+- Roadmap and high-level design: `docs/planning/`.
+- Feature specs: `docs/specs/` (one doc per feature, e.g. `docs/specs/phase-2-packetizer.md`).
+- Before implementing a feature, read the relevant spec. If none exists, ask whether to draft one in `docs/specs/` first.
+
+## Git Workflow (single developer, no PRs)
+
+- **Before any repository changes** — create a local feature branch from `main` first. Never edit, commit, or stage files directly on `main`.
+- Name the branch for the work (e.g. `phase-2-packetizer`).
+
+```bash
+git checkout main && git pull
+git checkout -b phase-2-packetizer
+```
+- Do **not** open pull requests or push feature branches to remote.
+- Commit incrementally on the feature branch with clear, focused messages.
+- Merge to `main` only after the human developer **explicitly approves** in Cursor chat.
+- After merge to `main`:
+  1. Delete the local feature branch.
+  2. Push `main` to `origin`.
+- Never force-push `main`.
+
+## Commits
+
+- Write messages that explain **what** was implemented and **why**.
+- Reference the spec doc when one exists.
+
+```
+Implement word-boundary packetizer for mesh replies.
+
+Adds packetize.py per docs/specs/phase-2-packetizer.md.
+```
+
+- Do not commit unless the developer asks, or approval to merge includes committing.
+
+## Implementation
+
+- Follow patterns in existing code; keep changes scoped to the current feature.
+- Match the architecture in `docs/planning/initial-plan.md` unless a spec overrides it.
+- `game/` — Go `zorkd` service (PTY wrapper, HTTP API, sanitizer).
+- `zorkbot/` — Python mesh bot (planned).
+- Prefer simple, tested changes over new abstractions.
+- Game data (`*.z3`) and runtime saves stay out of git; use mounts under `games/` and `data/`.
