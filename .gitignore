@@ -1,0 +1,15 @@
+# Game data (mount at runtime)
+games/*.z3
+
+# Runtime data
+data/saves/*
+!data/saves/.gitkeep
+
+# Go
+game/bin/
+.tools/
+
+# Editor / OS
+.DS_Store
+*.swp
+.env

@@ -364,11 +364,11 @@ If PTY integration with encrusted proves fragile, [dumbfrotz](https://github.com
 
 ### Phase 1 — Game service (no radio)
 
-- [ ] Dockerfile: build encrusted for `arm64`, compile Go wrapper
-- [ ] Go PTY session manager (creack/pty)
-- [ ] Input sanitizer (Go + tests)
-- [ ] HTTP API (`/command`, `/health`, `/status`, `/reset`)
-- [ ] Manual test: `curl -X POST .../command -d '{"text":"look"}'`
+- [x] Dockerfile: build encrusted for `arm64`, compile Go wrapper
+- [x] Go PTY session manager (creack/pty)
+- [x] Input sanitizer (Go + tests)
+- [x] HTTP API (`/command`, `/health`, `/status`, `/reset`)
+- [x] Manual test: `curl -X POST .../command -d '{"text":"look"}'`
 
 ### Phase 2 — Packetizer + game client
 
