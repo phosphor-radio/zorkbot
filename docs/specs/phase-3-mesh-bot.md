@@ -34,6 +34,6 @@ Standalone Python bot using `meshcore` directly:
 ```bash
 docker compose up game
 cd zorkbot && .venv/bin/pip install -e ".[dev]"
-GAME_URL=http://localhost:8080 zorkbot --simulate
+GAME_URL=http://localhost:8080 .venv/bin/zorkbot --simulate
 # > @[zorkbot] !zork look
 ```

@@ -78,10 +78,12 @@ cd zorkbot
 .venv/bin/pip install -e ".[dev]"
 
 # Local REPL (game service must be reachable)
-GAME_URL=http://localhost:8080 zorkbot --simulate
+GAME_URL=http://localhost:8080 .venv/bin/zorkbot --simulate
+
+# Or activate the venv first: source .venv/bin/activate
 
 # Serial device
-zorkbot --serial /dev/ttyUSB0 --config zorkbot.toml
+.venv/bin/zorkbot --serial /dev/ttyUSB0 --config zorkbot.toml
 ```
 
 See [docs/specs/phase-3-mesh-bot.md](docs/specs/phase-3-mesh-bot.md).
