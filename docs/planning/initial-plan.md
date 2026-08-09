@@ -372,10 +372,10 @@ If PTY integration with encrusted proves fragile, [dumbfrotz](https://github.com
 
 ### Phase 2 — Packetizer + game client
 
-- [ ] Python `packetize.py` with word-boundary splitting at 100 chars
-- [ ] Python `sanitize.py` (mirror of Go rules)
-- [ ] Python `game_client.py` async HTTP client
-- [ ] Unit tests for sanitize and packetize
+- [x] Python `packetize.py` with word-boundary splitting at 100 chars
+- [x] Python `sanitize.py` (mirror of Go rules)
+- [x] Python `game_client.py` async HTTP client
+- [x] Unit tests for sanitize and packetize
 
 ### Phase 3 — Standalone mesh bot
 

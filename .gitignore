@@ -9,6 +9,12 @@ data/saves/*
 game/bin/
 .tools/
 
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Editor / OS
 .DS_Store
 *.swp

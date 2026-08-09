@@ -49,3 +49,22 @@ curl -s http://localhost:8080/command \
 | `GET /status` | Uptime and busy state |
 | `POST /command` | `{"text":"look","admin":false}` → game output |
 | `POST /reset` | Restart game; requires `X-Admin-Token` header |
+
+## Phase 2: Packetizer + game client
+
+The `zorkbot/` directory contains the Python library used by the mesh bot:
+
+- `sanitize.py` — input filter (mirrors Go rules)
+- `packetize.py` — word-boundary splitter for ~100 char mesh packets
+- `game_client.py` — async HTTP client for `zorkd`
+
+See [docs/specs/phase-2-packetizer-game-client.md](docs/specs/phase-2-packetizer-game-client.md).
+
+### Test
+
+```bash
+cd zorkbot
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/pytest
+```
