@@ -379,11 +379,11 @@ If PTY integration with encrusted proves fragile, [dumbfrotz](https://github.com
 
 ### Phase 3 — Standalone mesh bot
 
-- [ ] meshcore connection (serial / tcp / ble)
-- [ ] `#zork` channel filtering
-- [ ] `!zork` command with `@[zorkbot]` addressing
-- [ ] Admin commands: `save`, `restore`, `reset`
-- [ ] `--simulate` mode for local dev
+- [x] meshcore connection (serial / tcp / ble)
+- [x] `#zork` channel filtering
+- [x] `!zork` command with `@[zorkbot]` addressing
+- [x] Admin commands: `save`, `restore`, `reset`
+- [x] `--simulate` mode for local dev
 
 ### Phase 4 — Docker Compose + Pi deploy
 

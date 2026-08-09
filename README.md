@@ -68,3 +68,20 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest
 ```
+
+## Phase 3: Mesh bot
+
+Run against a MeshCore device or in simulate mode:
+
+```bash
+cd zorkbot
+.venv/bin/pip install -e ".[dev]"
+
+# Local REPL (game service must be reachable)
+GAME_URL=http://localhost:8080 zorkbot --simulate
+
+# Serial device
+zorkbot --serial /dev/ttyUSB0 --config zorkbot.toml
+```
+
+See [docs/specs/phase-3-mesh-bot.md](docs/specs/phase-3-mesh-bot.md).

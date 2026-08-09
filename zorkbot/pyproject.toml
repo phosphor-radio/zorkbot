@@ -5,7 +5,11 @@ description = "MeshCore radio bot for shared Zork I"
 requires-python = ">=3.13"
 dependencies = [
     "httpx>=0.27",
+    "meshcore>=2.3",
 ]
+
+[project.scripts]
+zorkbot = "zorkbot.cli:main"
 
 [project.optional-dependencies]
 dev = [
