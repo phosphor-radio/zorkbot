@@ -9,7 +9,7 @@ Standalone Python bot using `meshcore` directly:
 
 - Serial / TCP / BLE connection via CLI flags
 - Listen on configured `#zork` channel slot only
-- `!zork` command dispatch (no bot mention required)
+- `!zork` command dispatch (`!help` / `!commands` aliases; optional `@[zorkbot]` prefix)
 - Admin commands: `save`, `restore`, `reset` (name allowlist and/or admin token)
 - `--simulate` REPL for local dev without radio hardware
 
@@ -18,11 +18,13 @@ Standalone Python bot using `meshcore` directly:
 | Input | Action |
 |-------|--------|
 | `!zork` | Game service status + brief help |
-| `!zork help` | Bot-side help text |
+| `!zork help`, `!help`, `!commands` | Bot-side help text |
 | `!zork save [token]` | Admin: encrusted `save` |
 | `!zork restore [token]` | Admin: encrusted `restore` |
 | `!zork reset [token]` | Admin: restart game via `/reset` |
 | `!zork <text>` | Forward game command |
+
+All of the above may be prefixed with `@[zorkbot]` (or `@zorkbot` / `zorkbot`).
 
 ## Admin
 

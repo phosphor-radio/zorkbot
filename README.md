@@ -71,7 +71,7 @@ python3 -m venv .venv
 
 ## Phase 3: Mesh bot
 
-Run against a MeshCore device or in simulate mode. On `#zork`, send `!zork` commands directly — no bot mention required.
+Run against a MeshCore device or in simulate mode. On `#zork`, send `!zork`, `!help`, or `!commands` — no bot mention required. You may also prefix any command with `@[zorkbot]`.
 
 ```bash
 cd zorkbot

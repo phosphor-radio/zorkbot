@@ -14,10 +14,13 @@ from zorkbot.sanitize import NotAllowedError, validate
 logger = logging.getLogger(__name__)
 
 HELP_TEXT = """!zork help — this message
+!help / !commands — same as !zork help
 !zork — game status
 !zork <command> — play Zork I
 
 e.g. !zork look
+
+@[zorkbot] may prefix any command.
 
 Everyone shares one game."""
 

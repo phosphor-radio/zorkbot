@@ -87,15 +87,17 @@ The game service binds only on the Docker internal network — not exposed to th
 
 ### Addressing
 
-On `#zork`, send commands starting with `!zork`:
+On `#zork`, send commands starting with `!zork`, `!help`, or `!commands`:
 
 ```
 !zork look
+!help
+!commands
 !zork take lamp
 !zork go north
 ```
 
-No bot mention is required. The bot only responds on the `#zork` channel.
+No bot mention is required. You may also prefix any command with `@[zorkbot]`. The bot only responds on the `#zork` channel.
 
 ### Commands
 
@@ -103,7 +105,7 @@ No bot mention is required. The bot only responds on the `#zork` channel.
 |---------|-----|---------|
 | `!zork <text>` | Everyone | Send a game command to the shared world |
 | `!zork` | Everyone | Bot status (uptime, busy state, brief help) |
-| `!zork help` | Everyone | Bot-side help (not encrusted `$help`) |
+| `!zork help`, `!help`, `!commands` | Everyone | Bot-side help (not encrusted `$help`) |
 | `!zork save` | Admin | Trigger encrusted `save` |
 | `!zork restore` | Admin | Trigger encrusted `restore` |
 | `!zork reset` | Admin | Restart the game from scratch |

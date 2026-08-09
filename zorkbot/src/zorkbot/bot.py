@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from zorkbot.addressing import parse_zork_command
+from zorkbot.addressing import parse_command, strip_address
 from zorkbot.channels import is_zork_channel
 from zorkbot.commands.zork import handle_zork
 from zorkbot.config import BotConfig
@@ -30,9 +30,10 @@ class ZorkBot:
             logger.debug("ignoring message on channel %s", message.channel_idx)
             return
 
-        args = parse_zork_command(message.text.strip())
+        rest, _mentioned = strip_address(message.text.strip(), self.name)
+        args = parse_command(rest)
         if args is None:
-            logger.debug("ignoring non-zork message: %r", message.text)
+            logger.debug("ignoring non-command message: %r", message.text)
             return
 
         ctx = Context(

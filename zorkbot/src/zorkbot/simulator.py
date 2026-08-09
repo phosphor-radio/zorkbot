@@ -9,7 +9,7 @@ from zorkbot.context import IncomingMessage
 
 BANNER = (
     "Simulator: messages are handled in memory, nothing is sent over the mesh.\n"
-    "Send !zork commands on #zork, e.g. '!zork look'.\n"
+    "Send !zork, !help, or !commands on #zork, e.g. '!zork look'.\n"
     "/help for simulator controls, /quit to leave."
 )
 

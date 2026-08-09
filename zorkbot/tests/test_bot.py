@@ -60,3 +60,52 @@ async def test_dispatch_ignores_other_channels() -> None:
 
     assert replies == []
     assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_dispatch_help_command() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = ZorkBot(config, game)
+        await bot.dispatch(
+            IncomingMessage(
+                text="!help",
+                sender_name="player",
+                channel_idx=config.channel.index,
+            ),
+            reply,
+        )
+
+    assert any("!zork help" in line for line in replies)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_dispatch_mentioned_command() -> None:
+    config = BotConfig()
+    respx.post("http://game:8080/command").mock(
+        return_value=Response(200, json={"ok": True, "output": "Taken.\n"})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = ZorkBot(config, game)
+        await bot.dispatch(
+            IncomingMessage(
+                text="@[zorkbot] !zork take lamp",
+                sender_name="player",
+                channel_idx=config.channel.index,
+            ),
+            reply,
+        )
+
+    assert replies == ["@[player] Taken."]

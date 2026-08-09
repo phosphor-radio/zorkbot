@@ -18,4 +18,4 @@ async def test_simulator_help() -> None:
     async with GameClient(config.game_url) as game:
         sim = Simulator(ZorkBot(config, game))
         lines = await sim.handle_line("!zork help")
-    assert any("shared world" in line.lower() for line in lines)
+    assert any("shares one game" in line.lower() for line in lines)
