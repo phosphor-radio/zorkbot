@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 HELP_TEXT = """!zork help — this message
 !zork — game status
-!zork <command> — play Zork I (shared world)
+!zork <command> — play Zork I
+
+e.g. !zork look
 
 Everyone shares one game."""
 
