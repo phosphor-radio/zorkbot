@@ -13,16 +13,14 @@ from zorkbot.sanitize import NotAllowedError, validate
 
 logger = logging.getLogger(__name__)
 
-HELP_TEXT = """!zork help — this message
-!help / !commands — same as !zork help
-!zork — game status
-!zork <command> — play Zork I
+HELP_TEXT = """
+!zork help / !help / !commands
+!zork
+!zork <command>
 
 e.g. !zork look
 
-@[zorkbot] may prefix any command.
-
-Everyone shares one game."""
+Everyone shares one game!"""
 
 
 def is_admin(sender_name: str | None, token: str | None, config: BotConfig) -> bool:

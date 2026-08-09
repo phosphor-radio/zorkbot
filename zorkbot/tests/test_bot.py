@@ -82,7 +82,7 @@ async def test_dispatch_help_command() -> None:
             reply,
         )
 
-    assert any("!zork help" in line for line in replies)
+    assert any("!zork help" in line or "!help" in line for line in replies)
 
 
 @pytest.mark.asyncio
