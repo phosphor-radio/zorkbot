@@ -107,7 +107,7 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, pty.ErrBusy):
 			status = http.StatusConflict
 			msg = "game is busy, try again"
-		case errors.Is(err, pty.ErrTimeout):
+		case errors.Is(err, pty.ErrTimeout), errors.Is(err, context.DeadlineExceeded):
 			status = http.StatusGatewayTimeout
 			msg = "command timed out"
 		case errors.Is(err, pty.ErrNotAlive):

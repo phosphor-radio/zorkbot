@@ -19,3 +19,20 @@ func TestHasPrompt(t *testing.T) {
 		t.Fatal("expected no prompt without > suffix")
 	}
 }
+
+func TestHasFilenamePrompt(t *testing.T) {
+	if !hasFilenamePrompt([]byte("save\r\n\r\nFilename [zork1.sav]: ")) {
+		t.Fatal("expected filename prompt")
+	}
+	if hasFilenamePrompt([]byte("West of House\r\n> ")) {
+		t.Fatal("expected no filename prompt for game prompt")
+	}
+}
+
+func TestExtractSaveResponse(t *testing.T) {
+	raw := []byte("\r\nOk.\r\n\r\n> ")
+	got := extractResponse(raw, "save")
+	if got != "Ok." {
+		t.Fatalf("extractResponse() = %q, want %q", got, "Ok.")
+	}
+}

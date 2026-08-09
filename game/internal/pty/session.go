@@ -212,6 +212,10 @@ func (s *Session) Command(ctx context.Context, text string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if isSaveRestoreCommand(text) {
+		return s.commandWithFilenamePrompt(ctx, text)
+	}
+
 	if _, err := fmt.Fprintf(s.ptmx, "%s\n", text); err != nil {
 		return "", fmt.Errorf("write command: %w", err)
 	}
@@ -223,7 +227,35 @@ func (s *Session) Command(ctx context.Context, text string) (string, error) {
 	return extractResponse(raw, text), nil
 }
 
+func (s *Session) commandWithFilenamePrompt(ctx context.Context, command string) (string, error) {
+	if _, err := fmt.Fprintf(s.ptmx, "%s\n", command); err != nil {
+		return "", fmt.Errorf("write command: %w", err)
+	}
+
+	if _, err := s.readUntilFilenamePrompt(ctx); err != nil {
+		return "", err
+	}
+	if _, err := fmt.Fprintf(s.ptmx, "\n"); err != nil {
+		return "", fmt.Errorf("write filename: %w", err)
+	}
+
+	suffix, err := s.readUntilPrompt(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return extractResponse(suffix, command), nil
+}
+
+func (s *Session) readUntilFilenamePrompt(ctx context.Context) ([]byte, error) {
+	return s.readUntil(ctx, hasFilenamePrompt)
+}
+
 func (s *Session) readUntilPrompt(ctx context.Context) ([]byte, error) {
+	return s.readUntil(ctx, hasPrompt)
+}
+
+func (s *Session) readUntil(ctx context.Context, ready func([]byte) bool) ([]byte, error) {
 	timeout := s.cfg.CommandTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
@@ -253,7 +285,7 @@ func (s *Session) readUntilPrompt(ctx context.Context) ([]byte, error) {
 		case <-ctx.Done():
 			return buf, ctx.Err()
 		case <-idleTimer.C:
-			if hasPrompt(buf) {
+			if ready(buf) {
 				return buf, nil
 			}
 			idleTimer.Reset(s.cfg.IdleWait)
@@ -271,17 +303,17 @@ func (s *Session) readUntilPrompt(ctx context.Context) ([]byte, error) {
 			}
 			if result.err != nil {
 				if result.err == io.EOF {
-					if hasPrompt(buf) {
+					if ready(buf) {
 						return buf, nil
 					}
 					return buf, ErrNotAlive
 				}
-				if hasPrompt(buf) {
+				if ready(buf) {
 					return buf, nil
 				}
 				return buf, result.err
 			}
-			if time.Since(lastData) >= s.cfg.IdleWait && hasPrompt(buf) {
+			if time.Since(lastData) >= s.cfg.IdleWait && ready(buf) {
 				return buf, nil
 			}
 		}

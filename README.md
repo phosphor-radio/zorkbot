@@ -87,3 +87,69 @@ GAME_URL=http://localhost:8080 .venv/bin/zorkbot --simulate
 ```
 
 See [docs/specs/phase-3-mesh-bot.md](docs/specs/phase-3-mesh-bot.md).
+
+## Admin access
+
+Admin commands on mesh: `!zork save`, `!zork restore`, and `!zork reset`. Normal players cannot send raw `save` or `restore` as game commands.
+
+Mesh sender names are **spoofable** — treat `admin.names` as convenience only. Use a shared **admin token** for sensitive operations.
+
+### Configure the token
+
+Set the same secret for both the game service and the bot.
+
+**Environment variable (recommended):**
+
+```bash
+export ADMIN_TOKEN="choose-a-long-random-secret"
+```
+
+With Docker Compose, put `ADMIN_TOKEN` in a `.env` file at the repo root (or export it in your shell). The `game` service reads it automatically. When running the bot, pass the same value:
+
+```bash
+ADMIN_TOKEN="choose-a-long-random-secret" \
+GAME_URL=http://localhost:8080 \
+.venv/bin/zorkbot --simulate
+```
+
+**zorkbot TOML (optional):**
+
+```toml
+# zorkbot.toml — ADMIN_TOKEN env var overrides this if set
+admin_token = "choose-a-long-random-secret"
+```
+
+Copy `zorkbot/zorkbot.toml.example` to `zorkbot.toml` and edit. Keep tokens out of git.
+
+The game service (`zorkd`) uses `ADMIN_TOKEN` for `POST /reset`. The bot forwards that token when an admin runs `!zork reset`.
+
+### Authorize admins on mesh
+
+In `zorkbot.toml`:
+
+```toml
+[admin]
+names = ["your-mesh-name"]
+```
+
+A listed name can run admin commands without appending a token. Anyone can spoof a name on mesh, so prefer the token for `reset` (and for `save`/`restore` when security matters).
+
+### Use admin commands
+
+Mention the bot, then send the command on `#zork`:
+
+```
+@[zorkbot] !zork save
+@[zorkbot] !zork restore
+@[zorkbot] !zork reset
+```
+
+With a token (works even if your name is not in `admin.names`):
+
+```
+@[zorkbot] !zork save choose-a-long-random-secret
+@[zorkbot] !zork restore choose-a-long-random-secret
+@[zorkbot] !zork reset choose-a-long-random-secret
+```
+
+In simulate mode, set the sender with `/name your-mesh-name` to test the name allowlist.

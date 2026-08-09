@@ -46,6 +46,20 @@ func hasPrompt(buf []byte) bool {
 	return strings.HasSuffix(cleaned, ">")
 }
 
+func hasFilenamePrompt(buf []byte) bool {
+	cleaned := strings.TrimRight(stripANSI(string(buf)), " \t\n\r")
+	return strings.Contains(cleaned, "Filename") && strings.HasSuffix(cleaned, ":")
+}
+
+func isSaveRestoreCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "save", "restore":
+		return true
+	default:
+		return false
+	}
+}
+
 func isPromptOnlyLine(line string) bool {
 	trimmed := strings.TrimSpace(stripANSI(line))
 	if trimmed == ">" {
