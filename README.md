@@ -71,7 +71,7 @@ python3 -m venv .venv
 
 ## Phase 3: Mesh bot
 
-Run against a MeshCore device or in simulate mode:
+Run against a MeshCore device or in simulate mode. On `#zork`, send `!zork` commands directly — no bot mention required.
 
 ```bash
 cd zorkbot
@@ -79,6 +79,7 @@ cd zorkbot
 
 # Local REPL (game service must be reachable)
 GAME_URL=http://localhost:8080 .venv/bin/zorkbot --simulate
+# > !zork look
 
 # Or activate the venv first: source .venv/bin/activate
 
@@ -136,20 +137,20 @@ A listed name can run admin commands without appending a token. Anyone can spoof
 
 ### Use admin commands
 
-Mention the bot, then send the command on `#zork`:
+Mention the bot is not required. On `#zork`, send:
 
 ```
-@[zorkbot] !zork save
-@[zorkbot] !zork restore
-@[zorkbot] !zork reset
+!zork save
+!zork restore
+!zork reset
 ```
 
 With a token (works even if your name is not in `admin.names`):
 
 ```
-@[zorkbot] !zork save choose-a-long-random-secret
-@[zorkbot] !zork restore choose-a-long-random-secret
-@[zorkbot] !zork reset choose-a-long-random-secret
+!zork save choose-a-long-random-secret
+!zork restore choose-a-long-random-secret
+!zork reset choose-a-long-random-secret
 ```
 
 In simulate mode, set the sender with `/name your-mesh-name` to test the name allowlist.

@@ -1,27 +1,8 @@
-"""Tests for mention and !zork parsing."""
+"""Tests for !zork command parsing."""
 
 import pytest
 
-from zorkbot.addressing import parse_zork_command, strip_address
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("@[zorkbot] !zork look", ("!zork look", True)),
-        ("@zorkbot !zork look", ("!zork look", True)),
-        ("zorkbot !zork look", ("!zork look", True)),
-        ("!zork look", ("!zork look", False)),
-    ],
-)
-def test_strip_address(text: str, expected: tuple[str, bool]) -> None:
-    assert strip_address(text, "zorkbot") == expected
-
-
-def test_strip_address_rejects_partial_name_match() -> None:
-    text, addressed = strip_address("zorkbotanist !zork look", "zorkbot")
-    assert addressed is False
-    assert text == "zorkbotanist !zork look"
+from zorkbot.addressing import parse_zork_command
 
 
 @pytest.mark.parametrize(
@@ -32,6 +13,7 @@ def test_strip_address_rejects_partial_name_match() -> None:
         ("!zork take lamp", "take lamp"),
         ("!help", None),
         ("!zorkathon", None),
+        ("@[zorkbot] !zork look", None),
     ],
 )
 def test_parse_zork_command(text: str, expected: str | None) -> None:

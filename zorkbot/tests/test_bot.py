@@ -25,7 +25,7 @@ async def test_dispatch_game_command() -> None:
         bot = ZorkBot(config, game)
         await bot.dispatch(
             IncomingMessage(
-                text="@[zorkbot] !zork take lamp",
+                text="!zork take lamp",
                 sender_name="player",
                 channel_idx=config.channel.index,
             ),
@@ -51,7 +51,7 @@ async def test_dispatch_ignores_other_channels() -> None:
         bot = ZorkBot(config, game)
         await bot.dispatch(
             IncomingMessage(
-                text="@[zorkbot] !zork look",
+                text="!zork look",
                 sender_name="player",
                 channel_idx=99,
             ),

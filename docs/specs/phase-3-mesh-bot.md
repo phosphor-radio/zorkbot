@@ -9,7 +9,7 @@ Standalone Python bot using `meshcore` directly:
 
 - Serial / TCP / BLE connection via CLI flags
 - Listen on configured `#zork` channel slot only
-- `@[zorkbot] !zork` addressing and command dispatch
+- `!zork` command dispatch (no bot mention required)
 - Admin commands: `save`, `restore`, `reset` (name allowlist and/or admin token)
 - `--simulate` REPL for local dev without radio hardware
 
@@ -35,5 +35,5 @@ Standalone Python bot using `meshcore` directly:
 docker compose up game
 cd zorkbot && .venv/bin/pip install -e ".[dev]"
 GAME_URL=http://localhost:8080 .venv/bin/zorkbot --simulate
-# > @[zorkbot] !zork look
+# > !zork look
 ```

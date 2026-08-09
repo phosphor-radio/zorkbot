@@ -73,7 +73,7 @@ The game service binds only on the Docker internal network — not exposed to th
 |----------|--------|-----------|
 | Game sessions | **Shared** — one world for all players | Fits mesh radio UX; one encrusted process is light on a Pi |
 | Mesh channel | **`#zork`** | Dedicated channel for game traffic |
-| Bot name | **`zorkbot`** | Mention syntax: `@[zorkbot] !zork look` |
+| Bot name | **`zorkbot`** | Device name on mesh; commands are `!zork ...` on `#zork` |
 | Bot framework | **Standalone** | Not a fork of [ottobot](https://github.com/tahnok/ottobot); uses meshcore directly, borrowing ottobot patterns where useful |
 | Game wrapper | **Go + creack/pty** | Single static binary, clean PTY handling for encrusted's TTY expectations |
 | Interpreter | **encrusted** | User preference; v3 Z-machine, terminal-native |
@@ -87,15 +87,15 @@ The game service binds only on the Docker internal network — not exposed to th
 
 ### Addressing
 
-Players mention the bot by name before sending a command:
+On `#zork`, send commands starting with `!zork`:
 
 ```
-@[zorkbot] !zork look
-@[zorkbot] !zork take lamp
-@[zorkbot] !zork go north
+!zork look
+!zork take lamp
+!zork go north
 ```
 
-Alternate forms (hand-typed): `@zorkbot !zork look`, `zorkbot !zork look`.
+No bot mention is required. The bot only responds on the `#zork` channel.
 
 ### Commands
 
@@ -112,7 +112,7 @@ Alternate forms (hand-typed): `@zorkbot !zork look`, `zorkbot !zork look`.
 
 - Bot joins and listens on **`#zork`** only (or answers commands only on that channel slot).
 - Game commands from other channels are ignored.
-- On startup, bot may announce: *"Zork I is live on #zork — try `@[zorkbot] !zork look`"*
+- On startup, bot may announce: *"Zork I is live on #zork — try `!zork look`"*
 
 ### Shared Game Behavior
 
@@ -152,8 +152,8 @@ Rejected commands return a short channel message, e.g. *"That command isn't allo
 Normal users cannot send raw `save` or `restore` to encrusted. Admins use bot commands:
 
 ```
-@[zorkbot] !zork save
-@[zorkbot] !zork restore
+!zork save
+!zork restore
 ```
 
 The bot verifies admin status, then forwards the literal `save` or `restore` string to the game service.
@@ -381,7 +381,7 @@ If PTY integration with encrusted proves fragile, [dumbfrotz](https://github.com
 
 - [x] meshcore connection (serial / tcp / ble)
 - [x] `#zork` channel filtering
-- [x] `!zork` command with `@[zorkbot]` addressing
+- [x] `!zork` command on `#zork` (no mention required)
 - [x] Admin commands: `save`, `restore`, `reset`
 - [x] `--simulate` mode for local dev
 
@@ -415,7 +415,7 @@ curl -s http://localhost:8080/command \
 
 # Terminal 3 (once bot exists)
 uv run zorkbot --simulate
-# > @[zorkbot] !zork take lamp
+# > !zork take lamp
 ```
 
 ---

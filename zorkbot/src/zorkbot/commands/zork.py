@@ -69,8 +69,7 @@ async def _reply_status(ctx: Context, game: GameClient) -> None:
 
     busy = "busy" if status.busy else "ready"
     await ctx.reply(
-        f"Zork I is {busy} (uptime {status.uptime}). "
-        f"Try @[{ctx.config.name}] !zork look"
+        f"Zork I is {busy} (uptime {status.uptime}). Try !zork look"
     )
 
 

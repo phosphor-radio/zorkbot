@@ -16,9 +16,7 @@ from zorkbot.context import IncomingMessage
 logger = logging.getLogger(__name__)
 
 SEND_SPACING_SECONDS = 2.0
-STARTUP_MESSAGE = (
-    "Zork I is live on #zork — try `@[{name}] !zork look`"
-)
+STARTUP_MESSAGE = "Zork I is live on #zork — try !zork look"
 
 
 async def connect(
@@ -86,7 +84,7 @@ class MeshCoreRunner:
         if self.bot.config.announce_on_start:
             await self._send_chan_msg(
                 self.bot.config.channel.index,
-                STARTUP_MESSAGE.format(name=self.bot.name),
+                STARTUP_MESSAGE,
             )
 
     async def stop(self) -> None:

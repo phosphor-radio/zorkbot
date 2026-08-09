@@ -9,7 +9,7 @@ from zorkbot.context import IncomingMessage
 
 BANNER = (
     "Simulator: messages are handled in memory, nothing is sent over the mesh.\n"
-    "Mention the bot to address it, e.g. '@[{name}] !zork look'.\n"
+    "Send !zork commands on #zork, e.g. '!zork look'.\n"
     "/help for simulator controls, /quit to leave."
 )
 
@@ -81,7 +81,7 @@ class Simulator:
             case "status":
                 return [
                     f"{self.sender_name} on channel {self.channel_idx} "
-                    f"(mention as @[{self.bot.name}])"
+                    f"(send !zork commands here)"
                 ]
             case "help" | "?":
                 return CONTROL_HELP
@@ -92,7 +92,7 @@ class Simulator:
                 return [f"unknown control /{name} — try /help"]
 
     async def repl(self) -> None:
-        print(BANNER.format(name=self.bot.name))
+        print(BANNER)
         while not self.done:
             try:
                 line = await asyncio.to_thread(input, self.prompt)
