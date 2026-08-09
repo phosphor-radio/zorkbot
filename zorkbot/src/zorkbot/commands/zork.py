@@ -16,10 +16,8 @@ logger = logging.getLogger(__name__)
 HELP_TEXT = """!zork help — this message
 !zork — game status
 !zork <command> — play Zork I (shared world)
-!zork save|restore|reset — admin only
 
-Everyone shares one game. Names on mesh are spoofable; sensitive admin
-commands accept an admin token: !zork reset <token>"""
+Everyone shares one game."""
 
 
 def is_admin(sender_name: str | None, token: str | None, config: BotConfig) -> bool:
