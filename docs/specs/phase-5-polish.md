@@ -24,6 +24,8 @@ Commands are processed one at a time by a background worker. While a game comman
 
 Admin names in `zorkbot.toml` bypass rate limiting but still use the queue.
 
+**Note:** [admin-via-dm.md](admin-via-dm.md) replaces name-based exemption with allowlisted DM pubkeys.
+
 ## Files
 
 | Path | Purpose |

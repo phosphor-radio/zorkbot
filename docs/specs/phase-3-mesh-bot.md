@@ -28,8 +28,7 @@ All of the above may be prefixed with `@[zorkbot]` (or `@zorkbot` / `zorkbot`).
 
 ## Admin
 
-- `admin.names` in TOML (advisory; sender names are spoofable on mesh)
-- `ADMIN_TOKEN` env or config for `!zork save|restore|reset <token>`
+**Superseded by** [admin-via-dm.md](admin-via-dm.md): admin commands via DM + `[admin].pubkeys` allowlist. Mesh `admin.names` and `!zork … <token>` are removed by that change. `ADMIN_TOKEN` remains only for bot → `zorkd` HTTP (`X-Admin-Token`).
 
 ## Verification
 
