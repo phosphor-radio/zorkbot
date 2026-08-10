@@ -1,4 +1,8 @@
-"""Message and handler context types."""
+"""Message and handler context types.
+
+IncomingMessage, Context, and ReplyFunc follow patterns from ottobot
+(https://github.com/tahnok/ottobot, MIT License, Copyright (c) Wesley Ellis).
+"""
 
 from __future__ import annotations
 

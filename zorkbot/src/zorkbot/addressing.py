@@ -1,4 +1,8 @@
-"""Bot mention and command parsing."""
+"""Bot mention and command parsing.
+
+strip_address() is adapted from ottobot's Ottobot.strip_address()
+(https://github.com/tahnok/ottobot, MIT License, Copyright (c) Wesley Ellis).
+"""
 
 from __future__ import annotations
 

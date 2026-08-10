@@ -1,4 +1,8 @@
-"""Mesh channel configuration for zorkbot."""
+"""Mesh channel configuration for zorkbot.
+
+Channel index gating follows the command-channel pattern used by ottobot
+(https://github.com/tahnok/ottobot, MIT License, Copyright (c) Wesley Ellis).
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Word-boundary packetizer for mesh radio replies."""
+"""Word-boundary packetizer for mesh radio replies.
+
+Greedy word-boundary packing is inspired by ottobot's !help chunker
+(https://github.com/tahnok/ottobot, MIT License, Copyright (c) Wesley Ellis).
+"""
 
 from __future__ import annotations
 

@@ -2,6 +2,7 @@
 name = "zorkbot"
 version = "0.1.0"
 description = "MeshCore radio bot for shared Zork I"
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
     "httpx>=0.27",

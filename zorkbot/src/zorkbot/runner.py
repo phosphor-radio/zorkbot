@@ -1,4 +1,9 @@
-"""MeshCore device connection and message loop."""
+"""MeshCore device connection and message loop.
+
+Channel message parsing, send spacing, and serial send locking follow
+patterns from ottobot's runner
+(https://github.com/tahnok/ottobot, MIT License, Copyright (c) Wesley Ellis).
+"""
 
 from __future__ import annotations
 
