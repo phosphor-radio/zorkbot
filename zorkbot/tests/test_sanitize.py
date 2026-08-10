@@ -32,13 +32,13 @@ def test_validate_blocks_any_dollar_prefix() -> None:
         validate("$custom")
 
 
-@pytest.mark.parametrize("command", ["save", "restore", "SAVE", "Restore"])
+@pytest.mark.parametrize("command", ["save", "restore", "quit", "SAVE", "Quit"])
 def test_validate_blocks_save_restore_for_non_admin(command: str) -> None:
     with pytest.raises(NotAllowedError):
         validate(command)
 
 
-@pytest.mark.parametrize("command", ["save", "restore"])
+@pytest.mark.parametrize("command", ["save", "restore", "quit"])
 def test_validate_allows_save_restore_for_admin(command: str) -> None:
     validate(command, admin=True)
 

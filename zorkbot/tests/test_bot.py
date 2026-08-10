@@ -1,9 +1,11 @@
+import json
+
 import pytest
 import respx
 from httpx import Response
 
 from zorkbot.bot import ZorkBot
-from zorkbot.config import BotConfig
+from zorkbot.config import AdminConfig, BotConfig
 from zorkbot.context import IncomingMessage
 from zorkbot.game_client import GameClient
 
@@ -109,3 +111,61 @@ async def test_dispatch_mentioned_command() -> None:
         )
 
     assert replies == ["@[player] Taken."]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_dispatch_quit_requires_admin() -> None:
+    config = BotConfig()
+    route = respx.post("http://game:8080/command").mock(
+        return_value=Response(200, json={"ok": True, "output": "Goodbye.\n"})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = ZorkBot(config, game)
+        await bot.dispatch(
+            IncomingMessage(
+                text="!zork quit",
+                sender_name="player",
+                channel_idx=config.channel.index,
+            ),
+            reply,
+        )
+
+    assert replies == ["You are not authorized for that command."]
+    assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_dispatch_quit_allows_admin() -> None:
+    config = BotConfig(admin=AdminConfig(names=["admin"]))
+    route = respx.post("http://game:8080/command").mock(
+        return_value=Response(200, json={"ok": True, "output": "Goodbye.\n"})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = ZorkBot(config, game)
+        await bot.dispatch(
+            IncomingMessage(
+                text="!zork quit",
+                sender_name="admin",
+                channel_idx=config.channel.index,
+            ),
+            reply,
+        )
+
+    assert replies == ["@[admin] Goodbye."]
+    assert route.called
+    assert json.loads(route.calls.last.request.content) == {
+        "text": "quit",
+        "admin": True,
+    }

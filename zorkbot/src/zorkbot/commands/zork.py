@@ -56,7 +56,7 @@ async def handle_zork(
     subcommand = parts[0].lower()
     token = parts[1] if len(parts) > 1 else None
 
-    if subcommand in {"save", "restore", "reset"}:
+    if subcommand in {"save", "restore", "reset", "quit"}:
         await _handle_admin(ctx, game, game_lock, subcommand, token)
         return
 

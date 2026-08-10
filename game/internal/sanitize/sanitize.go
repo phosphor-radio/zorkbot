@@ -40,7 +40,7 @@ func Validate(text string, admin bool) error {
 		return ErrNotAllowed
 	}
 	lower := strings.ToLower(text)
-	if !admin && (lower == "save" || lower == "restore") {
+	if !admin && (lower == "save" || lower == "restore" || lower == "quit") {
 		return ErrNotAllowed
 	}
 	return nil

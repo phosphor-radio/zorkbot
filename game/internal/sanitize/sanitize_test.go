@@ -36,7 +36,7 @@ func TestValidateBlocksAnyDollarPrefix(t *testing.T) {
 }
 
 func TestValidateBlocksSaveRestoreForNonAdmin(t *testing.T) {
-	for _, cmd := range []string{"save", "restore", "SAVE", "Restore"} {
+	for _, cmd := range []string{"save", "restore", "quit", "SAVE", "Quit"} {
 		if err := Validate(cmd, false); err != ErrNotAllowed {
 			t.Fatalf("expected %q to be blocked for non-admin: %v", cmd, err)
 		}
@@ -44,7 +44,7 @@ func TestValidateBlocksSaveRestoreForNonAdmin(t *testing.T) {
 }
 
 func TestValidateAllowsSaveRestoreForAdmin(t *testing.T) {
-	for _, cmd := range []string{"save", "restore"} {
+	for _, cmd := range []string{"save", "restore", "quit"} {
 		if err := Validate(cmd, true); err != nil {
 			t.Fatalf("expected %q to be allowed for admin: %v", cmd, err)
 		}

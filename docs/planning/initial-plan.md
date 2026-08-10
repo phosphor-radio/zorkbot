@@ -141,7 +141,7 @@ $history  $have_attr  $have_prop  $steal  $teleport
 Additional blocks:
 
 - Any input starting with `$`
-- `save` / `restore` when the sender is **not** an admin (routed via `!zork save` / `!zork restore` instead)
+- `save` / `restore` / `quit` when the sender is **not** an admin (routed via `!zork save` / `!zork restore` / `!zork quit` instead)
 - Empty input
 - Control characters and ANSI sequences in input
 - Embedded newlines (one command per mesh message)
@@ -149,9 +149,9 @@ Additional blocks:
 
 Rejected commands return a short channel message, e.g. *"That command isn't allowed."*
 
-### Admin-only: save / restore
+### Admin-only: save / restore / quit
 
-Normal users cannot send raw `save` or `restore` to encrusted. Admins use bot commands:
+Normal users cannot send raw `save`, `restore`, or `quit` to encrusted. Admins use bot commands:
 
 ```
 !zork save

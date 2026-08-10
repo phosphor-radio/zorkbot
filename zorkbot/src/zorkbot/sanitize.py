@@ -36,7 +36,7 @@ def validate(text: str, *, admin: bool = False) -> None:
     if _has_control_or_ansi(text):
         raise NotAllowedError()
     lower = text.lower()
-    if not admin and lower in {"save", "restore"}:
+    if not admin and lower in {"save", "restore", "quit"}:
         raise NotAllowedError()
 
 
