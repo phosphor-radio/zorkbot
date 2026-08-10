@@ -2,16 +2,45 @@ services:
   game:
     build: ./game
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     volumes:
       - ./data/saves:/data
       - ./games/zork1.z3:/game/zork1.z3:ro
     environment:
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
+    mem_limit: 128m
+
+  zorkbot:
+    build: ./zorkbot
+    restart: unless-stopped
+    depends_on:
+      game:
+        condition: service_healthy
+    devices:
+      - ${MESHCORE_DEVICE:-/dev/meshcore}:${MESHCORE_CONTAINER_DEVICE:-/dev/meshcore}
+    group_add:
+      - ${MESHCORE_GROUP_GID:-20}
+    volumes:
+      - ${ZORKBOT_CONFIG:-./zorkbot/zorkbot.toml}:/app/zorkbot.toml:ro
+    environment:
+      GAME_URL: http://game:8080
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+    command:
+      - --serial
+      - ${MESHCORE_CONTAINER_DEVICE:-/dev/meshcore}
+      - --config
+      - /app/zorkbot.toml
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '[z]orkbot' >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 256m

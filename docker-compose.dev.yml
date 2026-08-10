@@ -1,0 +1,8 @@
+# Local development overrides. Publish the game API on localhost.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  game:
+    ports:
+      - "8080:8080"

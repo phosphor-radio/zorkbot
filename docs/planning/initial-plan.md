@@ -389,9 +389,9 @@ If PTY integration with encrusted proves fragile, [dumbfrotz](https://github.com
 
 ### Phase 4 — Docker Compose + Pi deploy
 
-- [ ] Multi-container compose with health checks
-- [ ] Volume mounts, udev documentation
-- [ ] README with setup steps
+- [x] Multi-container compose with health checks
+- [x] Volume mounts, udev documentation
+- [x] README with setup steps
 
 ### Phase 5 — Polish
 

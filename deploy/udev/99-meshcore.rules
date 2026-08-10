@@ -1,0 +1,15 @@
+# Stable symlink for a MeshCore USB serial device.
+#
+# 1. Plug in the radio and find the port, e.g. /dev/ttyUSB0 or /dev/ttyACM0
+# 2. Run: udevadm info -a -n /dev/ttyUSB0 | grep -E 'idVendor|idProduct|serial'
+# 3. Replace the ATTRS below with your device's values
+# 4. Install:
+#      sudo cp deploy/udev/99-meshcore.rules /etc/udev/rules.d/
+#      sudo udevadm control --reload-rules
+#      sudo udevadm trigger
+# 5. Unplug/replug; confirm /dev/meshcore exists
+#
+# Example for a generic CP210x adapter (replace with your IDs):
+# SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="meshcore"
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0000", ATTRS{idProduct}=="0000", SYMLINK+="meshcore"

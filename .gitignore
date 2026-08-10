@@ -5,6 +5,9 @@ games/*.z3
 data/saves/*
 !data/saves/.gitkeep
 
+# Local bot config (copy from zorkbot.toml.example)
+zorkbot/zorkbot.toml
+
 # Go
 game/bin/
 .tools/

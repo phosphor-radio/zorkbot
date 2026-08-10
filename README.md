@@ -16,8 +16,10 @@ The `game/` directory contains **zorkd**, a Go HTTP wrapper around [encrusted](h
 
 ```bash
 cp /path/to/zork1.z3 games/zork1.z3
-docker compose up --build game
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build game
 ```
+
+The dev override publishes port `8080` on localhost. On a Pi, use the full stack (see [Phase 4](#phase-4-docker-compose--pi-deploy)) without the dev override so the game API stays on the Docker network only.
 
 ### Run locally
 
@@ -154,3 +156,22 @@ With a token (works even if your name is not in `admin.names`):
 ```
 
 In simulate mode, set the sender with `/name your-mesh-name` to test the name allowlist.
+
+## Phase 4: Docker Compose + Pi deploy
+
+Run **game** and **zorkbot** together on a Raspberry Pi (or any `linux/arm64` host with Docker).
+
+```bash
+cp .env.example .env                  # set ADMIN_TOKEN
+cp zorkbot/zorkbot.toml.example zorkbot/zorkbot.toml
+cp /path/to/zork1.z3 games/zork1.z3
+
+docker compose up -d --build
+```
+
+- Game API is **not** published to the LAN by default (bot uses `http://game:8080` internally).
+- Mount a stable serial device via udev (`/dev/meshcore`) — see [docs/deploy/raspberry-pi.md](docs/deploy/raspberry-pi.md).
+- For local curl/simulate testing, add the dev override:  
+  `docker compose -f docker-compose.yml -f docker-compose.dev.yml up game`
+
+See [docs/specs/phase-4-docker-compose-pi-deploy.md](docs/specs/phase-4-docker-compose-pi-deploy.md).
