@@ -6,13 +6,13 @@ name = "zorkbot"
 game_url = "http://game:8080"
 # admin_token = "change-me"  # prefer ADMIN_TOKEN env var
 
+# packet_max_chars = 100
+# log_level = "INFO"
+# announce_on_start = true
+
 [channel]
 index = 1
 name = "#zork"
 
 [admin]
 names = ["your-mesh-name"]
-
-# packet_max_chars = 100
-# log_level = "INFO"
-# announce_on_start = true
