@@ -123,10 +123,6 @@ async def _handle_game_command(
         await ctx.reply("That command isn't allowed.")
         return
 
-    if game_lock.locked():
-        await ctx.reply("The game is busy, try again.")
-        return
-
     async with game_lock:
         try:
             result = await game.command(command_text, admin=False)

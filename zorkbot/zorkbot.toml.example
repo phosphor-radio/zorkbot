@@ -9,6 +9,8 @@ game_url = "http://game:8080"
 # packet_max_chars = 100
 # log_level = "INFO"
 # announce_on_start = true
+# command_queue_size = 8
+# rate_limit_seconds = 3.0
 
 [channel]
 index = 1

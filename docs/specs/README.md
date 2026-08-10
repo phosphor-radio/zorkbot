@@ -16,3 +16,4 @@ Specs should cover scope, API/behavior, files touched, and how to verify the wor
 | [phase-2-packetizer-game-client.md](phase-2-packetizer-game-client.md) | Packetizer + game client |
 | [phase-3-mesh-bot.md](phase-3-mesh-bot.md) | Mesh bot |
 | [phase-4-docker-compose-pi-deploy.md](phase-4-docker-compose-pi-deploy.md) | Docker Compose + Pi deploy |
+| [phase-5-polish.md](phase-5-polish.md) | Queue, rate limits, log rotation |

@@ -175,3 +175,12 @@ docker compose up -d --build
   `docker compose -f docker-compose.yml -f docker-compose.dev.yml up game`
 
 See [docs/specs/phase-4-docker-compose-pi-deploy.md](docs/specs/phase-4-docker-compose-pi-deploy.md).
+
+## Phase 5: Polish
+
+- **Command queue** — serial processing with `command_queue_size` (default 8); rejects when full
+- **Rate limiting** — `rate_limit_seconds` per sender (default 3; 0 = off); admins exempt
+- **Startup announce** — `announce_on_start` posts to `#zork` on mesh connect (default on)
+- **Log rotation** — Compose uses `json-file` driver with 10 MB × 3 files per service
+
+See [docs/specs/phase-5-polish.md](docs/specs/phase-5-polish.md).

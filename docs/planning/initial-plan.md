@@ -395,10 +395,10 @@ If PTY integration with encrusted proves fragile, [dumbfrotz](https://github.com
 
 ### Phase 5 — Polish
 
-- [ ] Busy / queue handling for concurrent commands
-- [ ] Startup channel announcement
-- [ ] Rate limiting (soft, per sender name)
-- [ ] Log rotation on small SD cards
+- [x] Busy / queue handling for concurrent commands
+- [x] Startup channel announcement
+- [x] Rate limiting (soft, per sender name)
+- [x] Log rotation on small SD cards
 
 ---
 

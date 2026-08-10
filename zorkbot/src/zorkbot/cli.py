@@ -49,7 +49,11 @@ async def run(args: argparse.Namespace) -> None:
         admin_token=config.admin_token,
     ) as game:
         if args.simulate:
-            await Simulator(ZorkBot(config, game)).repl()
+            bot = ZorkBot(config, game)
+            try:
+                await Simulator(bot).repl()
+            finally:
+                await bot.stop()
             return
 
         meshcore = await connect(
@@ -70,7 +74,10 @@ async def run(args: argparse.Namespace) -> None:
                     )
             bot = ZorkBot(config, game)
             runner = MeshCoreRunner(bot, meshcore)
-            await runner.run_forever()
+            try:
+                await runner.run_forever()
+            finally:
+                await bot.stop()
         finally:
             await meshcore.disconnect()
 

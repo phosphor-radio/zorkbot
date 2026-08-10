@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 
 _ADMIN_KEYS = frozenset({"names"})
 _CHANNEL_KEYS = frozenset({"index", "name", "secret"})
-_ROOT_OPTIONAL_KEYS = frozenset({"log_level", "packet_max_chars", "announce_on_start"})
+_ROOT_OPTIONAL_KEYS = frozenset({
+    "log_level",
+    "packet_max_chars",
+    "announce_on_start",
+    "command_queue_size",
+    "rate_limit_seconds",
+})
 
 
 @dataclass
@@ -32,6 +38,8 @@ class BotConfig:
     log_level: str | None = None
     packet_max_chars: int = 100
     announce_on_start: bool = True
+    command_queue_size: int = 8
+    rate_limit_seconds: float = 3.0
 
     @property
     def admin_names(self) -> frozenset[str]:
@@ -72,6 +80,10 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
     announce_on_start = _root_value(data, channel, admin, "announce_on_start")
     if announce_on_start is not None:
         config.announce_on_start = bool(announce_on_start)
+    if command_queue_size := _root_value(data, channel, admin, "command_queue_size"):
+        config.command_queue_size = int(command_queue_size)
+    if rate_limit_seconds := _root_value(data, channel, admin, "rate_limit_seconds"):
+        config.rate_limit_seconds = float(rate_limit_seconds)
 
     if channel:
         config.channel = ChannelConfig(

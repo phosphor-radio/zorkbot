@@ -53,6 +53,7 @@ class Simulator:
             replies.append(text)
 
         await self.bot.dispatch(self.build_message(line), reply)
+        await self.bot.drain()
         if not replies:
             return ["(no response)"]
 

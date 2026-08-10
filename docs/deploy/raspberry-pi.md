@@ -142,3 +142,4 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build game
 | zorkbot can't open serial | `ls -l $MESHCORE_DEVICE`, udev symlink, dialout GID |
 | game unhealthy | `docker compose logs game`, confirm `games/zork1.z3` exists |
 | bot ignores commands | channel index in TOML vs mesh channel slot |
+| SD card fills with logs | Compose log rotation (`max-size` / `max-file` in `docker-compose.yml`) |
