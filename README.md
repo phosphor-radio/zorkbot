@@ -4,6 +4,48 @@ MeshCore radio bot for a shared game of Zork I. Players on `#zork` send commands
 
 Everyone shares one game state. Commands are processed one at a time.
 
+## About Zork
+
+### What it is
+
+[Zork I](https://en.wikipedia.org/wiki/Zork_I) is a classic text adventure: you explore the Great Underground Empire, solve puzzles, collect treasures, and try not to get eaten by a grue. You type short English commands; the game replies with prose. There are no graphics — the map and objects exist only in the text.
+
+On `#zork`, every player shares **one** game world. What one person takes or opens affects everyone else.
+
+### How to play
+
+Prefix game commands with `!zork` on the mesh (see [Mesh commands](#mesh-commands) below). Examples:
+
+| Kind | Examples |
+| ---- | -------- |
+| Look around | `!zork look` (or `l`) |
+| Move | `!zork north`, `!zork go east` (short forms: `n`, `s`, `e`, `w`, `u`, `d`) |
+| Take and use things | `!zork take lamp`, `!zork open mailbox`, `!zork read leaflet` |
+| Inventory | `!zork inventory` (or `i`) |
+| Other verbs | `drop`, `put`, `examine`, `unlock`, `light`, `attack`, … — try what seems natural |
+
+The parser understands many synonyms (`get` / `take`, `x` / `examine`). If stuck, `!zork look` is almost always safe.
+
+**Room descriptions:** Zork prints the **full** description of a location only the **first** time you enter it. When you return, you usually get a one-line summary (e.g. *"Forest"*). Use `!zork look` anytime to see the complete description again — especially useful on mesh, where you may have missed earlier packets or joined mid-game.
+
+### Brief history
+
+Zork began at MIT in the late 1970s as *Dungeon*, inspired by early cave-exploration games. Infocom refined and published it as **Zork I: The Great Underground Empire** in 1980. It helped define interactive fiction and shipped on mainframes, personal computers, and later every platform that could run a [Z-machine](https://en.wikipedia.org/wiki/Zork_Machine) interpreter. This project runs the original story file (`zork1.z3`) through [encrusted](https://github.com/DeMille/encrusted), a modern Z-machine interpreter.
+
+### Playing over MeshCore
+
+LoRa mesh is slow and message-sized (~140 characters on the wire). Zorkbot is built to keep traffic down:
+
+- **Packetized replies** — Game output is split into ~100-character packets on word boundaries, with `(1/n)` markers when a reply spans multiple messages.
+- **One command at a time** — A queue serializes play so the shared world stays consistent and the channel is not flooded with overlapping output.
+- **Per-sender rate limit** — Default 3 seconds between commands from the same player (configurable).
+- **Spacing between sends** — The bot waits between outbound packets so radios and repeaters can keep up.
+- **No reply prefixes** — Channel replies omit per-player `@[name]` tags to save characters per packet.
+- **Quiet startup** — The bot does not announce on channel by default when it starts (`announce_on_start = false`).
+- **Filtered input** — Debug and interpreter meta-commands (e.g. `$`-prefixed encrusted commands) are blocked so they cannot spam the mesh or corrupt the session.
+
+Expect long room descriptions and puzzle feedback to arrive as several short messages. If output feels thin, run `!zork look`.
+
 ## Architecture
 
 Two services, typically run together with Docker Compose on a Raspberry Pi:
