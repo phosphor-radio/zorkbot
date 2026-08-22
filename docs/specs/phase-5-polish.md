@@ -16,7 +16,7 @@
 |---------|---------|------------|
 | Command queue depth | 8 | `command_queue_size` |
 | Rate limit interval | 3 seconds | `rate_limit_seconds` (0 = off) |
-| Startup announce | on | `announce_on_start` |
+| Startup announce | off | `announce_on_start` |
 | Queue full reply | *The game is busy, try again.* | — |
 | Rate limit reply | *Slow down — try again in a moment.* | — |
 

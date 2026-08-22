@@ -23,6 +23,17 @@ names = ["alice", "bob"]
     assert config.game_url == "http://localhost:18080"
     assert config.channel.index == 2
     assert config.admin_names == frozenset({"alice", "bob"})
+    assert config.announce_on_start is False
+
+
+def test_announce_on_start_defaults_false_when_absent() -> None:
+    assert load_config(None).announce_on_start is False
+
+
+def test_announce_on_start_can_be_enabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("announce_on_start = true\n")
+    assert load_config(config_path).announce_on_start is True
 
 
 def test_load_config_accepts_misplaced_root_keys_under_admin(tmp_path: Path) -> None:

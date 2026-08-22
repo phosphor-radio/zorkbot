@@ -135,7 +135,7 @@ names = ["your-mesh-name"]
 
 # Optional
 # packet_max_chars = 100
-# announce_on_start = true
+# announce_on_start = false
 # command_queue_size = 8
 # rate_limit_seconds = 3.0
 ```
