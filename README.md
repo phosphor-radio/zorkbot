@@ -76,44 +76,152 @@ The game service talks to encrusted over a PTY so the interpreter gets normal te
 
 ## Deploy on a Raspberry Pi
 
+Deploy the full **game** + **zorkbot** stack on a 64-bit Raspberry Pi (Pi OS or another `linux/arm64` distro) with Docker Compose.
+
+### Install Docker
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in so the `docker` group applies.
+
+### Clone and configure
+
 ```bash
 git clone https://github.com/phosphor-radio/zorkbot.git
 cd zorkbot
 
 cp /path/to/zork1.z3 games/zork1.z3
-cp .env.example .env
 cp zorkbot/zorkbot.toml.example zorkbot/zorkbot.toml
+cp .env.example .env
 ```
 
-Edit `.env` — set `ADMIN_TOKEN` to a long random secret.
+Edit `.env`:
 
-Edit `zorkbot/zorkbot.toml` — set your mesh name under `[admin].names` and confirm `[channel]` matches your `#zork` slot.
+- Set `ADMIN_TOKEN` to a long random secret.
+- Set `MESHCORE_DEVICE` if your radio is not at `/dev/meshcore`.
 
-### Stable serial device
+Edit `zorkbot/zorkbot.toml`:
 
-USB serial ports can change names across reboots. Create a udev symlink so Compose always sees `/dev/meshcore`:
+- Set `[admin].names` to your mesh name(s).
+- Confirm `[channel]` index/name match your `#zork` channel.
+
+`game_url` in TOML should stay `http://game:8080` for Compose (the Docker service name). See [Configuration](#configuration) for all settings.
+
+### Stable serial device (udev)
+
+USB serial ports often move between `/dev/ttyUSB0` and `/dev/ttyACM0` across reboots. Create a udev symlink so Compose always sees `/dev/meshcore`:
 
 ```bash
-# With the radio plugged in, find vendor/product IDs:
-udevadm info -a -n /dev/ttyUSB0 | grep -E '{idVendor}|{idProduct}'
+# Find the device (with radio plugged in)
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 
-# Edit deploy/udev/99-meshcore.rules, then install:
+# Get vendor/product IDs
+udevadm info -a -n /dev/ttyUSB0 | grep -E '{idVendor}|{idProduct}|{serial}'
+```
+
+Edit `deploy/udev/99-meshcore.rules` with your device's `idVendor` and `idProduct`, then install:
+
+```bash
 sudo cp deploy/udev/99-meshcore.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-If you skip udev, set `MESHCORE_DEVICE` and `MESHCORE_CONTAINER_DEVICE` in `.env` to the actual path (e.g. `/dev/ttyACM0`).
-
-### Start
+Unplug and replug the radio. Confirm:
 
 ```bash
-docker compose up -d --build
+ls -l /dev/meshcore
+```
+
+If you skip udev, set `MESHCORE_DEVICE` and `MESHCORE_CONTAINER_DEVICE` in `.env` to the actual path (e.g. `/dev/ttyACM0`).
+
+### Serial permissions
+
+The zorkbot container is added to the host **dialout** group (`MESHCORE_GROUP_GID`, default `20`). On Debian/Raspberry Pi OS:
+
+```bash
+getent group dialout
+```
+
+If your dialout GID differs, update `MESHCORE_GROUP_GID` in `.env`.
+
+### Build on the Pi
+
+The **game** image compiles encrusted from source (Rust). On a Pi Zero or other low-RAM board, a parallel build can exhaust memory and kill SSH or your shell mid-build.
+
+**Before the first build**, add swap if the Pi has 1 GB RAM or less:
+
+```bash
+sudo dphys-swapfile swapoff
+sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
+sudo dphys-swapfile setup && sudo dphys-swapfile swapon
+```
+
+Build **one service at a time** instead of `docker compose up -d --build`:
+
+```bash
+export COMPOSE_PARALLEL_LIMIT=1
+
+# Detached build survives SSH disconnect (check ~/build-game.log)
+nohup docker compose build game > ~/build-game.log 2>&1 &
+tail -f ~/build-game.log
+
+docker compose build zorkbot
+```
+
+The `game` Dockerfile serializes the Rust and Go compile steps and limits Rust parallelism (`CARGO_BUILD_JOBS=1`) to reduce peak RAM. The first `game` build on a Pi Zero can still take an hour or more.
+
+To build on a faster machine and deploy the image to the Pi, use `docker buildx build --platform linux/arm64` on your desktop, or pull a prebuilt image if one is published for this project.
+
+### Start the stack
+
+```bash
+docker compose up -d
+docker compose ps
 docker compose logs -f zorkbot
 ```
 
-The game API is only reachable on the Docker network (`http://game:8080`). It is not published to the LAN.
+The **game** service is only reachable on the Docker network (`http://game:8080`). It is not published to the LAN.
+
+On first start, zorkbot waits for the game health check, applies mesh settings, and listens on the configured `#zork` channel.
+
+### Verify
+
+```bash
+# Game health (from the Pi host, via docker exec)
+docker compose exec game wget -q -O- http://localhost:8080/health
+
+# Bot logs should show channel subscription
+docker compose logs zorkbot | tail
+```
 
 On mesh, send `!zork look` on `#zork`.
+
+### Volumes
+
+| Host path | Container | Purpose |
+| --------- | --------- | ------- |
+| `./data/saves` | `/data` (game) | encrusted save files |
+| `./games/zork1.z3` | `/game/zork1.z3` (game) | Zork I story file (read-only) |
+| `./zorkbot/zorkbot.toml` | `/app/zorkbot.toml` (zorkbot) | bot config (read-only) |
+
+Protect save data on the Pi:
+
+```bash
+chmod 700 data/saves
+```
+
+### Updates
+
+```bash
+git pull
+export COMPOSE_PARALLEL_LIMIT=1
+docker compose build game
+docker compose build zorkbot
+docker compose up -d
+```
 
 ## Mesh commands
 
@@ -331,6 +439,7 @@ Used by the bot over the Docker network. Not intended for public exposure.
 | Bot can't open serial     | `ls -l $MESHCORE_DEVICE`, udev symlink, `MESHCORE_GROUP_GID` |
 | Game unhealthy            | `docker compose logs game`; confirm `games/zork1.z3` exists  |
 | Bot ignores commands      | `[channel].index` in TOML vs actual mesh channel slot        |
+| Build kills SSH / shell   | Low RAM; add swap, build with `COMPOSE_PARALLEL_LIMIT=1`; see [Build on the Pi](#build-on-the-pi) |
 | SD card filling with logs | Compose caps logs at 10 MB × 3 files per service             |
 
 

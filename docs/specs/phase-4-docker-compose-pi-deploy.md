@@ -28,7 +28,6 @@
 | `.env.example` | `ADMIN_TOKEN`, serial device paths |
 | `zorkbot/Dockerfile` | Python 3.13 bot image |
 | `deploy/udev/99-meshcore.rules` | udev symlink template |
-| `docs/deploy/raspberry-pi.md` | Setup steps |
 
 ## Verification
 
@@ -39,7 +38,7 @@ cp zorkbot/zorkbot.toml.example zorkbot/zorkbot.toml
 
 ADMIN_TOKEN=test docker compose config
 
-# Full build (slow: compiles encrusted)
+# Full build (slow: compiles encrusted; on Pi use serial builds — see README Deploy on a Raspberry Pi)
 docker compose up --build
 
 # Dev: game on localhost:8080

@@ -1,14 +1,17 @@
 # Build encrusted for the target platform.
 FROM --platform=$BUILDPLATFORM rust:1-bookworm AS encrusted-builder
+ENV CARGO_BUILD_JOBS=1
 RUN cargo install encrusted --bin encrusted --locked
 
-# Build the Go HTTP wrapper.
+# Build the Go HTTP wrapper after encrusted (serializes BuildKit stages for low-RAM hosts).
 FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS go-builder
+COPY --from=encrusted-builder /usr/local/cargo/bin/encrusted /tmp/.encrusted-built
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
 ARG TARGETOS TARGETARCH
+ENV GOMAXPROCS=1
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /zorkd ./cmd/zorkd
 
 FROM debian:bookworm-slim

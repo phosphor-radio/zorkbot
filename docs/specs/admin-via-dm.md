@@ -182,7 +182,7 @@ Channel path continues to parse `Name: body`; DM path does not trust a name for 
 |------|--------|
 | `README.md` | Admin via DM + pubkey list; remove token-on-channel and `admin.names` |
 | `zorkbot/zorkbot.toml.example` | `[admin] pubkeys`; drop `names` / mesh `admin_token` comments |
-| `docs/deploy/raspberry-pi.md` | How to obtain node pubkey (client UI / contact export) and add to TOML |
+| `README.md` | How to obtain node pubkey (client UI / contact export) and add to TOML |
 | `docs/specs/phase-3-mesh-bot.md` | Note superseded admin section → this spec |
 | `docs/specs/phase-5-polish.md` | Rate-limit exemption → admin pubkeys |
 | `docs/planning/initial-plan.md` | Optional one-line pointer (no full rewrite required) |
@@ -210,7 +210,7 @@ How operators get a pubkey (document concretely in README/deploy):
 | `zorkbot/tests/test_admin.py` | Pubkey/DM auth; channel reject |
 | `zorkbot/tests/test_config.py` | Pubkey validation |
 | `zorkbot/tests/test_bot.py` | Update quit/admin cases |
-| `README.md`, `docs/deploy/raspberry-pi.md` | Operator docs |
+| `README.md` | Operator docs (includes Pi deploy) |
 
 New small helper (optional module): e.g. `zorkbot/admin_auth.py` — unique prefix resolve + allowlist check — keeps runner/bot thin.
 
