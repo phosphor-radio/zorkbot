@@ -15,12 +15,17 @@ logger = logging.getLogger(__name__)
 
 HELP_TEXT = """
 !zork help / !help / !commands
+!author
 !zork
 !zork <command>
 
 e.g. !zork look
 
 Everyone shares one game!"""
+
+AUTHOR_TEXT = """Meshcore: phr5🐧
+Discord: @phosphor_radio
+Source: https://github.com/phosphor-radio/zorkbot"""
 
 
 def is_admin(sender_name: str | None, token: str | None, config: BotConfig) -> bool:
@@ -44,6 +49,10 @@ async def handle_zork(
 
     if args.lower() == "help":
         await ctx.reply(HELP_TEXT)
+        return
+
+    if args.lower() == "author":
+        await ctx.reply(AUTHOR_TEXT)
         return
 
     parts = args.split()

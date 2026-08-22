@@ -8,6 +8,7 @@ from __future__ import annotations
 
 COMMAND = "!zork"
 HELP_COMMANDS = frozenset({"!help", "!commands"})
+AUTHOR_COMMAND = "!author"
 
 
 def strip_address(text: str, bot_name: str) -> tuple[str, bool]:
@@ -41,4 +42,6 @@ def parse_command(text: str) -> str | None:
     text = text.strip()
     if text.lower() in HELP_COMMANDS:
         return "help"
+    if text.lower() == AUTHOR_COMMAND:
+        return "author"
     return parse_zork_command(text)

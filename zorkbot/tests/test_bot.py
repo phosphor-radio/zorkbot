@@ -94,6 +94,33 @@ async def test_dispatch_help_command() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_dispatch_author_command() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = ZorkBot(config, game)
+        await bot.dispatch(
+            IncomingMessage(
+                text="!author",
+                sender_name="player",
+                channel_idx=config.channel.index,
+            ),
+            reply,
+        )
+        await bot.drain()
+
+    assert replies == [
+        "Meshcore: phr5🐧\nDiscord: @phosphor_radio\n"
+        "Source: https://github.com/phosphor-radio/zorkbot"
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_dispatch_mentioned_command() -> None:
     config = BotConfig()
     respx.post("http://game:8080/command").mock(

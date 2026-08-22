@@ -125,6 +125,7 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 | `!zork <text>`                     | Everyone | Send a game command             |
 | `!zork`                            | Everyone | Bot status (uptime, busy/ready) |
 | `!zork help`, `!help`, `!commands` | Everyone | Bot help text                   |
+| `!author`                          | Everyone | Author / project links          |
 | `!zork save`                       | Admin    | Trigger encrusted `save`        |
 | `!zork restore`                    | Admin    | Trigger encrusted `restore`     |
 | `!zork reset`                      | Admin    | Restart the game                |
@@ -137,6 +138,7 @@ Examples:
 !zork look
 !zork take lamp
 !help
+!author
 @[zorkbot] !zork go north
 ```
 

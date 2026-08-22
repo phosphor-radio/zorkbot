@@ -13,6 +13,7 @@ from zorkbot.addressing import parse_command, parse_zork_command, strip_address
         ("!zork take lamp", "take lamp"),
         ("!help", "help"),
         ("!commands", "help"),
+        ("!author", "author"),
         ("!zorkathon", None),
     ],
 )
@@ -23,6 +24,7 @@ def test_parse_command(text: str, expected: str | None) -> None:
 def test_parse_zork_command_only() -> None:
     assert parse_zork_command("!help") is None
     assert parse_zork_command("!commands") is None
+    assert parse_zork_command("!author") is None
 
 
 @pytest.mark.parametrize(
@@ -46,6 +48,7 @@ def test_strip_address(text: str, expected_rest: str, mentioned: bool) -> None:
         ("@[zorkbot] !zork look", "look"),
         ("@[zorkbot] !help", "help"),
         ("@[zorkbot] !commands", "help"),
+        ("@[zorkbot] !author", "author"),
         ("@zorkbot !zork", ""),
     ],
 )
