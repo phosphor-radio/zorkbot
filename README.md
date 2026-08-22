@@ -173,7 +173,87 @@ docker compose build zorkbot
 
 The `game` Dockerfile serializes the Rust and Go compile steps and limits Rust parallelism (`CARGO_BUILD_JOBS=1`) to reduce peak RAM. The first `game` build on a Pi Zero can still take an hour or more.
 
-To build on a faster machine and deploy the image to the Pi, use `docker buildx build --platform linux/arm64` on your desktop, or pull a prebuilt image if one is published for this project.
+Prefer [cross-building on another machine](#cross-build-on-another-machine) if you have a desktop or laptop available.
+
+### Cross-build on another machine
+
+Build `linux/arm64` images on a faster host with Docker Buildx, transfer them to the Pi, and start Compose without compiling on the Pi.
+
+Compose tags built images as `{project}-{service}` (default project name is the repo directory: `zorkbot-game`, `zorkbot-zorkbot`). Use the same names when cross-building.
+
+#### On the build machine (one-time setup)
+
+Install Docker with Buildx. On Linux amd64, enable QEMU so Buildx can target arm64:
+
+```bash
+docker buildx create --name zorkbot-builder --driver docker-container --use 2>/dev/null \
+  || docker buildx use zorkbot-builder
+docker buildx inspect --bootstrap
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Apple Silicon Macs and arm64 Linux hosts can skip the `binfmt` step; still pass `--platform linux/arm64` so images match the Pi.
+
+#### Build images
+
+From the repo root on the build machine:
+
+```bash
+git clone https://github.com/phosphor-radio/zorkbot.git
+cd zorkbot
+
+docker buildx build --platform linux/arm64 \
+  -t zorkbot-game:latest \
+  --load \
+  ./game
+
+docker buildx build --platform linux/arm64 \
+  -t zorkbot-zorkbot:latest \
+  --load \
+  ./zorkbot
+```
+
+`--load` imports the image into the local Docker engine so you can `docker save` it. The `game` build still compiles encrusted; it just runs on your desktop instead of the Pi.
+
+#### Transfer to the Pi
+
+```bash
+docker save zorkbot-game:latest zorkbot-zorkbot:latest | gzip > zorkbot-images-arm64.tar.gz
+scp zorkbot-images-arm64.tar.gz pi@pizero.local:~/zorkbot/
+```
+
+Copy config and story file if the Pi does not have them yet (`games/zork1.z3`, `.env`, `zorkbot/zorkbot.toml`).
+
+#### On the Pi
+
+```bash
+cd ~/zorkbot
+gunzip -c zorkbot-images-arm64.tar.gz | docker load
+docker compose up -d --no-build
+```
+
+`--no-build` tells Compose to use the loaded images instead of building from source. If your checkout lives in a directory other than `zorkbot`, set `COMPOSE_PROJECT_NAME=zorkbot` so service names match the image tags.
+
+#### Updates via cross-build
+
+Rebuild on the desktop, `docker save`, copy the tarball to the Pi, `docker load`, then:
+
+```bash
+docker compose up -d --no-build
+```
+
+#### Optional: registry instead of `scp`
+
+Push from the build machine:
+
+```bash
+docker tag zorkbot-game:latest ghcr.io/YOU/zorkbot-game:latest
+docker tag zorkbot-zorkbot:latest ghcr.io/YOU/zorkbot-zorkbot:latest
+docker push ghcr.io/YOU/zorkbot-game:latest
+docker push ghcr.io/YOU/zorkbot-zorkbot:latest
+```
+
+On the Pi, add `image:` lines for those tags (or retag after `docker pull`) and run `docker compose up -d --no-build`.
 
 ### Start the stack
 
@@ -215,6 +295,8 @@ chmod 700 data/saves
 
 ### Updates
 
+**On the Pi** (native build):
+
 ```bash
 git pull
 export COMPOSE_PARALLEL_LIMIT=1
@@ -222,6 +304,8 @@ docker compose build game
 docker compose build zorkbot
 docker compose up -d
 ```
+
+**Cross-built images:** rebuild on the desktop, transfer with `docker save` / `scp` / `docker load`, then `docker compose up -d --no-build` on the Pi.
 
 ## Mesh commands
 
