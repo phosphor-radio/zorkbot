@@ -31,12 +31,6 @@ def is_admin(sender_name: str | None, token: str | None, config: BotConfig) -> b
     return False
 
 
-def _sender_prefix(sender_name: str | None) -> str:
-    if not sender_name:
-        return ""
-    return f"@[{sender_name}] "
-
-
 async def handle_zork(
     ctx: Context,
     game: GameClient,
@@ -145,7 +139,6 @@ async def _reply_game_output(ctx: Context, output: str) -> None:
     packets = packetize(
         output,
         max_chars=ctx.config.packet_max_chars,
-        prefix=_sender_prefix(ctx.sender_name),
     )
     if not packets:
         return

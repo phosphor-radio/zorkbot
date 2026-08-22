@@ -16,7 +16,7 @@ Python library modules for the zorkbot service (no mesh I/O yet):
 - Strip ANSI escape sequences
 - Collapse excessive blank lines
 - Greedy word-boundary packing; never split mid-word
-- Optional `@[sender] ` prefix (budgeted against limit)
+- Optional `@[sender] ` prefix support in `packetize` (budgeted against limit); channel replies omit it to save packets
 - Optional `(i/n)` sequence markers for multi-packet replies
 - Default limit: 100 characters per packet
 

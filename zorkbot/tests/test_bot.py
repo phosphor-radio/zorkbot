@@ -37,7 +37,7 @@ async def test_dispatch_game_command() -> None:
         )
         await bot.drain()
 
-    assert replies == ["@[player] Taken."]
+    assert replies == ["Taken."]
 
 
 @pytest.mark.asyncio
@@ -116,7 +116,7 @@ async def test_dispatch_mentioned_command() -> None:
         )
         await bot.drain()
 
-    assert replies == ["@[player] Taken."]
+    assert replies == ["Taken."]
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_dispatch_quit_allows_admin() -> None:
         )
         await bot.drain()
 
-    assert replies == ["@[admin] Goodbye."]
+    assert replies == ["Goodbye."]
     assert route.called
     assert json.loads(route.calls.last.request.content) == {
         "text": "quit",
@@ -211,7 +211,7 @@ async def test_dispatch_rate_limits_sender() -> None:
             reply,
         )
 
-    assert replies == ["@[player] Ok.", "Slow down — try again in a moment."]
+    assert replies == ["Ok.", "Slow down — try again in a moment."]
 
 
 @pytest.mark.asyncio
