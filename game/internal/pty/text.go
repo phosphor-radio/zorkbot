@@ -120,11 +120,21 @@ func skipCommandEcho(lines []string, command string) int {
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if echo == "" {
-			if !strings.HasPrefix(trimmed, ">") {
+			// Skip blank lines before the echo starts.
+			if trimmed == "" {
+				continue
+			}
+			// Accept echo with or without the ">" prompt prefix.
+			content := trimmed
+			if strings.HasPrefix(content, ">") {
+				content = strings.TrimSpace(strings.TrimPrefix(content, ">"))
+			}
+			// A standalone ">" is the game prompt line, not an echo start.
+			if content == "" {
 				return 0
 			}
 			start = i
-			echo = strings.TrimSpace(strings.TrimPrefix(trimmed, ">"))
+			echo = content
 		} else if trimmed != "" {
 			echo += trimmed
 		}
