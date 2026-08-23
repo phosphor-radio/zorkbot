@@ -22,3 +22,6 @@ __pycache__/
 .DS_Store
 *.swp
 .env
+
+# Cross-build image tarballs (docker save) in repo root
+/*.tar.gz
