@@ -72,17 +72,9 @@ func extractResponse(raw []byte, command string) string {
 	text := normalizeNewlines(stripANSI(string(raw)))
 	lines := strings.Split(text, "\n")
 
-	start := 0
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, ">") {
-			continue
-		}
-		echo := strings.TrimSpace(strings.TrimPrefix(trimmed, ">"))
-		if strings.EqualFold(echo, command) {
-			start = i + 1
-			break
-		}
+	start := skipCommandEcho(lines, command)
+	if start == 0 {
+		start = skipCommandEchoLine(lines, command)
 	}
 
 	end := len(lines)
@@ -98,4 +90,60 @@ func extractResponse(raw []byte, command string) string {
 	}
 
 	return collapseBlankLines(strings.Join(lines[start:end], "\n"))
+}
+
+func skipCommandEchoLine(lines []string, command string) int {
+	command = strings.TrimSpace(command)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, ">") {
+			continue
+		}
+		echo := strings.TrimSpace(strings.TrimPrefix(trimmed, ">"))
+		if strings.EqualFold(echo, command) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func skipCommandEcho(lines []string, command string) int {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return 0
+	}
+
+	normalizedCommand := normalizeEcho(command)
+	echo := ""
+	start := -1
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if echo == "" {
+			if !strings.HasPrefix(trimmed, ">") {
+				return 0
+			}
+			start = i
+			echo = strings.TrimSpace(strings.TrimPrefix(trimmed, ">"))
+		} else if trimmed != "" {
+			echo += trimmed
+		}
+
+		normalizedEcho := normalizeEcho(echo)
+		if normalizedEcho == normalizedCommand {
+			return i + 1
+		}
+		if !strings.HasPrefix(normalizedCommand, normalizedEcho) {
+			return 0
+		}
+	}
+
+	if start >= 0 && normalizeEcho(echo) == normalizedCommand {
+		return len(lines)
+	}
+	return 0
+}
+
+func normalizeEcho(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), ""))
 }

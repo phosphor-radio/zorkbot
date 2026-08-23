@@ -36,3 +36,21 @@ func TestExtractSaveResponse(t *testing.T) {
 		t.Fatalf("extractResponse() = %q, want %q", got, "Ok.")
 	}
 }
+
+func TestExtractResponseStripsSplitCommandEcho(t *testing.T) {
+	raw := []byte("> ta\r\nke peppers\r\nYou can't see any peppers here!\r\n\r\n> ")
+	got := extractResponse(raw, "take peppers")
+	want := "You can't see any peppers here!"
+	if got != want {
+		t.Fatalf("extractResponse() = %q, want %q", got, want)
+	}
+}
+
+func TestExtractResponseStripsSplitCommandEchoTakeSack(t *testing.T) {
+	raw := []byte("> ta\r\nke sack\r\nTaken.\r\n\r\n> ")
+	got := extractResponse(raw, "take sack")
+	want := "Taken."
+	if got != want {
+		t.Fatalf("extractResponse() = %q, want %q", got, want)
+	}
+}
