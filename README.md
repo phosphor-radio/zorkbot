@@ -213,7 +213,7 @@ docker buildx build --platform linux/arm64 \
   ./zorkbot
 ```
 
-`--load` imports the image into the local Docker engine so you can `docker save` it. The `game` build still compiles encrusted; it just runs on your desktop instead of the Pi.
+`--load` imports the image into the local Docker engine so you can `docker save` it. The `game` build compiles encrusted for `linux/arm64` using QEMU emulation (the Rust stage cannot cross-compile without a cross-linker). Expect the `game` build to take 20–60 minutes on a desktop even with QEMU. The `zorkbot` build is Python and finishes quickly.
 
 #### Transfer to the Pi
 

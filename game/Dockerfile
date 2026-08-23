@@ -1,5 +1,8 @@
 # Build encrusted for the target platform.
-FROM --platform=$BUILDPLATFORM rust:1-bookworm AS encrusted-builder
+# Must use $TARGETPLATFORM (not $BUILDPLATFORM) so the Rust compiler
+# produces a binary that runs on the target architecture.  The Go stage
+# can stay on $BUILDPLATFORM because it cross-compiles via GOOS/GOARCH.
+FROM --platform=$TARGETPLATFORM rust:1-bookworm AS encrusted-builder
 ENV CARGO_BUILD_JOBS=1
 RUN cargo install encrusted --bin encrusted --locked
 
