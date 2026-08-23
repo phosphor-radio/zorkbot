@@ -26,6 +26,7 @@ const (
 	defaultIdleWait   = 200 * time.Millisecond
 	defaultCmdTimeout = 30 * time.Second
 	defaultDrainWait  = 10 * time.Millisecond
+	defaultReadPoll   = 10 * time.Millisecond
 )
 
 type Config struct {
@@ -291,65 +292,52 @@ func (s *Session) readUntil(ctx context.Context, ready func([]byte) bool) ([]byt
 		}
 	}
 
-	deadline := time.Now().Add(timeout)
+	cmdDeadline := time.Now().Add(timeout)
 	var buf []byte
-	lastData := time.Now()
-	idleTimer := time.NewTimer(s.cfg.IdleWait)
-	defer idleTimer.Stop()
+	var lastData time.Time
+	tmp := make([]byte, 4096)
 
 	for {
-		if time.Now().After(deadline) {
+		if ctx.Err() != nil {
+			return buf, ctx.Err()
+		}
+		if time.Now().After(cmdDeadline) {
 			return buf, ErrTimeout
 		}
 
-		readCh := make(chan readResult, 1)
-		go func() {
-			tmp := make([]byte, 4096)
-			n, err := s.ptmx.Read(tmp)
-			readCh <- readResult{n: n, data: tmp[:n], err: err}
-		}()
+		avail, err := ptyBytesAvailable(s.ptmx)
+		if err != nil {
+			return buf, fmt.Errorf("pty available: %w", err)
+		}
 
-		select {
-		case <-ctx.Done():
-			return buf, ctx.Err()
-		case <-idleTimer.C:
-			if ready(buf) {
+		if avail == 0 {
+			if !lastData.IsZero() && time.Since(lastData) >= s.cfg.IdleWait && ready(buf) {
 				return buf, nil
 			}
-			idleTimer.Reset(s.cfg.IdleWait)
-		case result := <-readCh:
-			if result.n > 0 {
-				buf = append(buf, result.data...)
-				lastData = time.Now()
-				if !idleTimer.Stop() {
-					select {
-					case <-idleTimer.C:
-					default:
-					}
-				}
-				idleTimer.Reset(s.cfg.IdleWait)
-			}
-			if result.err != nil {
-				if result.err == io.EOF {
-					if ready(buf) {
-						return buf, nil
-					}
-					return buf, ErrNotAlive
-				}
+			time.Sleep(defaultReadPoll)
+			continue
+		}
+
+		n := avail
+		if n > len(tmp) {
+			n = len(tmp)
+		}
+		got, err := s.ptmx.Read(tmp[:n])
+		if got > 0 {
+			buf = append(buf, tmp[:got]...)
+			lastData = time.Now()
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
 				if ready(buf) {
 					return buf, nil
 				}
-				return buf, result.err
+				return buf, ErrNotAlive
 			}
-			if time.Since(lastData) >= s.cfg.IdleWait && ready(buf) {
+			if ready(buf) {
 				return buf, nil
 			}
+			return buf, err
 		}
 	}
-}
-
-type readResult struct {
-	n    int
-	data []byte
-	err  error
 }
