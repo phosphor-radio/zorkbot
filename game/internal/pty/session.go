@@ -25,6 +25,7 @@ const (
 	defaultCols       = 80
 	defaultIdleWait   = 200 * time.Millisecond
 	defaultCmdTimeout = 30 * time.Second
+	defaultDrainWait  = 10 * time.Millisecond
 )
 
 type Config struct {
@@ -197,7 +198,7 @@ func (s *Session) Close() {
 }
 
 func (s *Session) bootstrap(ctx context.Context) error {
-	_, err := s.readUntilPrompt(ctx)
+	_, err := s.readUntil(ctx, hasPrompt)
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
@@ -220,7 +221,7 @@ func (s *Session) Command(ctx context.Context, text string) (string, error) {
 		return "", fmt.Errorf("write command: %w", err)
 	}
 
-	raw, err := s.readUntilPrompt(ctx)
+	raw, err := s.readUntilAndDrain(ctx, hasPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -232,14 +233,14 @@ func (s *Session) commandWithFilenamePrompt(ctx context.Context, command string)
 		return "", fmt.Errorf("write command: %w", err)
 	}
 
-	if _, err := s.readUntilFilenamePrompt(ctx); err != nil {
+	if _, err := s.readUntilAndDrain(ctx, hasFilenamePrompt); err != nil {
 		return "", err
 	}
 	if _, err := fmt.Fprintf(s.ptmx, "\n"); err != nil {
 		return "", fmt.Errorf("write filename: %w", err)
 	}
 
-	suffix, err := s.readUntilPrompt(ctx)
+	suffix, err := s.readUntilAndDrain(ctx, hasPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -247,12 +248,39 @@ func (s *Session) commandWithFilenamePrompt(ctx context.Context, command string)
 	return extractResponse(suffix, command), nil
 }
 
-func (s *Session) readUntilFilenamePrompt(ctx context.Context) ([]byte, error) {
-	return s.readUntil(ctx, hasFilenamePrompt)
+func (s *Session) readUntilAndDrain(ctx context.Context, ready func([]byte) bool) ([]byte, error) {
+	raw, err := s.readUntil(ctx, ready)
+	if err != nil {
+		return raw, err
+	}
+	s.drainPTY()
+	return raw, nil
 }
 
-func (s *Session) readUntilPrompt(ctx context.Context) ([]byte, error) {
-	return s.readUntil(ctx, hasPrompt)
+// drainPTY discards bytes already buffered in the PTY (echo tail, OSC sequences)
+// so they are not prepended to the next command read.
+func (s *Session) drainPTY() {
+	buf := make([]byte, 4096)
+	deadline := time.Now().Add(s.cfg.IdleWait)
+	for time.Now().Before(deadline) {
+		avail, err := ptyBytesAvailable(s.ptmx)
+		if err != nil || avail == 0 {
+			time.Sleep(defaultDrainWait)
+			continue
+		}
+		n := avail
+		if n > len(buf) {
+			n = len(buf)
+		}
+		got, err := s.ptmx.Read(buf[:n])
+		if got > 0 {
+			deadline = time.Now().Add(s.cfg.IdleWait)
+			continue
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (s *Session) readUntil(ctx context.Context, ready func([]byte) bool) ([]byte, error) {
