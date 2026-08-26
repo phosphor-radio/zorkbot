@@ -19,3 +19,4 @@ Specs should cover scope, API/behavior, files touched, and how to verify the wor
 | [phase-5-polish.md](phase-5-polish.md) | Queue, rate limits, log rotation |
 | [admin-via-dm.md](admin-via-dm.md) | Admin via DM + pubkey allowlist (replaces mesh token/names) |
 | [pty-drain-after-command.md](pty-drain-after-command.md) | PTY buffer drain after commands (echo leakage on Pi) |
+| [dm-sessions.md](dm-sessions.md) | DM-based per-player sessions |

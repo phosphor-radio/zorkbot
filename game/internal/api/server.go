@@ -15,17 +15,17 @@ import (
 )
 
 type Server struct {
-	manager    *pty.Manager
+	pool       *pty.Pool
 	adminToken string
 	logger     *log.Logger
 }
 
-func NewServer(manager *pty.Manager, adminToken string, logger *log.Logger) *Server {
+func NewServer(pool *pty.Pool, adminToken string, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
 	return &Server{
-		manager:    manager,
+		pool:       pool,
 		adminToken: adminToken,
 		logger:     logger,
 	}
@@ -34,41 +34,89 @@ func NewServer(manager *pty.Manager, adminToken string, logger *log.Logger) *Ser
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("POST /command", s.handleCommand)
-	mux.HandleFunc("POST /reset", s.handleReset)
+	mux.HandleFunc("POST /sessions", s.handleStartSession)
+	mux.HandleFunc("GET /sessions", s.handleListSessions)
+	mux.HandleFunc("POST /sessions/{player_id}/command", s.handleCommand)
+	mux.HandleFunc("DELETE /sessions/{player_id}", s.handleEndSession)
+	mux.HandleFunc("DELETE /sessions/{player_id}/save", s.handleResetSession)
 	return mux
 }
 
+// GET /health — always 200 while the pool is running (zero sessions is normal).
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if !s.manager.Alive() {
-		http.Error(w, "session not alive", http.StatusServiceUnavailable)
-		return
-	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
 
-type statusResponse struct {
-	Uptime string `json:"uptime"`
-	Busy   bool   `json:"busy"`
+// POST /sessions — start or restore a session.
+type startRequest struct {
+	PlayerID string `json:"player_id"`
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	started := s.manager.StartedAt()
-	uptime := "0s"
-	if !started.IsZero() {
-		uptime = time.Since(started).Round(time.Second).String()
+type startResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
+	var req startRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, startResponse{OK: false, Error: "invalid JSON body"})
+		return
 	}
-	writeJSON(w, http.StatusOK, statusResponse{
-		Uptime: uptime,
-		Busy:   s.manager.Busy(),
-	})
+	if err := pty.ValidatePlayerID(req.PlayerID); err != nil {
+		writeJSON(w, http.StatusBadRequest, startResponse{OK: false, Error: err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	if err := s.pool.Start(ctx, req.PlayerID); err != nil {
+		status := http.StatusInternalServerError
+		msg := err.Error()
+		if errors.Is(err, pty.ErrSessionFull) {
+			status = http.StatusServiceUnavailable
+			msg = "session pool is full"
+		}
+		writeJSON(w, status, startResponse{OK: false, Error: msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, startResponse{OK: true})
 }
 
+// GET /sessions — list active sessions.
+type sessionInfoJSON struct {
+	Num           int    `json:"num"`
+	PlayerID      string `json:"player_id"`
+	StartedAt     string `json:"started_at"`
+	LastCommandAt string `json:"last_command_at,omitempty"`
+}
+
+type listResponse struct {
+	Sessions []sessionInfoJSON `json:"sessions"`
+}
+
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	sessions := s.pool.List()
+	out := make([]sessionInfoJSON, 0, len(sessions))
+	for _, si := range sessions {
+		j := sessionInfoJSON{
+			Num:       si.Num,
+			PlayerID:  si.PlayerID,
+			StartedAt: si.StartedAt.UTC().Format(time.RFC3339),
+		}
+		if !si.LastCommandAt.IsZero() {
+			j.LastCommandAt = si.LastCommandAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, j)
+	}
+	writeJSON(w, http.StatusOK, listResponse{Sessions: out})
+}
+
+// POST /sessions/{player_id}/command
 type commandRequest struct {
-	Text  string `json:"text"`
-	Admin bool   `json:"admin"`
+	Text string `json:"text"`
 }
 
 type commandResponse struct {
@@ -78,36 +126,39 @@ type commandResponse struct {
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
-	var req commandRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, commandResponse{
-			OK:    false,
-			Error: "invalid JSON body",
-		})
+	playerID := r.PathValue("player_id")
+	if err := pty.ValidatePlayerID(playerID); err != nil {
+		writeJSON(w, http.StatusBadRequest, commandResponse{OK: false, Error: err.Error()})
 		return
 	}
 
-	if err := sanitize.Validate(req.Text, req.Admin); err != nil {
-		s.logger.Printf("blocked command: %q admin=%v", req.Text, req.Admin)
-		writeJSON(w, http.StatusOK, commandResponse{
-			OK:    false,
-			Error: sanitize.ErrNotAllowed.Error(),
-		})
+	var req commandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, commandResponse{OK: false, Error: "invalid JSON body"})
+		return
+	}
+
+	if err := sanitize.Validate(req.Text, false); err != nil {
+		s.logger.Printf("blocked command for player=%s: %q", playerID[:8], req.Text)
+		writeJSON(w, http.StatusOK, commandResponse{OK: false, Error: sanitize.ErrNotAllowed.Error()})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	output, err := s.manager.Command(ctx, strings.TrimSpace(req.Text))
+	output, err := s.pool.Command(ctx, playerID, strings.TrimSpace(req.Text))
 	if err != nil {
 		status := http.StatusInternalServerError
 		msg := err.Error()
 		switch {
+		case errors.Is(err, pty.ErrSessionNotFound):
+			status = http.StatusNotFound
+			msg = "no active session for player"
 		case errors.Is(err, pty.ErrBusy):
 			status = http.StatusConflict
 			msg = "game is busy, try again"
-		case errors.Is(err, pty.ErrTimeout), errors.Is(err, context.DeadlineExceeded):
+		case errors.Is(err, pty.ErrTimeout):
 			status = http.StatusGatewayTimeout
 			msg = "command timed out"
 		case errors.Is(err, pty.ErrNotAlive):
@@ -124,39 +175,54 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, commandResponse{OK: true, Output: output})
 }
 
-type resetResponse struct {
+// DELETE /sessions/{player_id} — end and save.
+type sessionResponse struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 }
 
-func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
-	if s.adminToken == "" {
-		writeJSON(w, http.StatusServiceUnavailable, resetResponse{
-			OK:    false,
-			Error: "admin token not configured",
-		})
-		return
-	}
-	if r.Header.Get("X-Admin-Token") != s.adminToken {
-		writeJSON(w, http.StatusUnauthorized, resetResponse{
-			OK:    false,
-			Error: "unauthorized",
-		})
+func (s *Server) handleEndSession(w http.ResponseWriter, r *http.Request) {
+	playerID := r.PathValue("player_id")
+	if err := pty.ValidatePlayerID(playerID); err != nil {
+		writeJSON(w, http.StatusBadRequest, sessionResponse{OK: false, Error: err.Error()})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 
-	if err := s.manager.Reset(ctx); err != nil {
-		writeJSON(w, http.StatusInternalServerError, resetResponse{
+	if err := s.pool.End(ctx, playerID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, pty.ErrSessionNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, sessionResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, sessionResponse{OK: true})
+}
+
+// DELETE /sessions/{player_id}/save — reset: wipe save + start fresh.
+// No admin token required — the bot enforces DM-only, own-session restriction
+// at the command level; player_id format validation provides path safety.
+func (s *Server) handleResetSession(w http.ResponseWriter, r *http.Request) {
+	playerID := r.PathValue("player_id")
+	if err := pty.ValidatePlayerID(playerID); err != nil {
+		writeJSON(w, http.StatusBadRequest, sessionResponse{OK: false, Error: err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	if err := s.pool.Reset(ctx, playerID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, sessionResponse{
 			OK:    false,
 			Error: fmt.Sprintf("reset failed: %v", err),
 		})
 		return
 	}
-
-	writeJSON(w, http.StatusOK, resetResponse{OK: true})
+	writeJSON(w, http.StatusOK, sessionResponse{OK: true})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

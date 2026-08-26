@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -16,22 +17,33 @@ import (
 func main() {
 	logger := log.New(os.Stdout, "zorkd ", log.LstdFlags|log.Lmsgprefix)
 
-	cfg := pty.Config{
+	sessionCfg := pty.Config{
 		EncrustedPath: envOr("ENCRUSTED_PATH", "/usr/local/bin/encrusted"),
 		GameFile:      envOr("GAME_FILE", "/game/zork1.z3"),
-		SaveDir:       envOr("SAVE_DIR", "/data"),
+		// SaveDir is set per-player by the pool; this field is ignored at the pool level.
 	}
 
-	manager := pty.NewManager(cfg)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	if err := manager.Start(ctx); err != nil {
-		logger.Fatalf("start session: %v", err)
+	maxSessions := envInt("MAX_ACTIVE_SESSIONS", 8)
+	idleStart := time.Duration(envInt("SESSION_IDLE_START_SECONDS", 300)) * time.Second
+	inactivity := time.Duration(envInt("SESSION_INACTIVITY_SECONDS", 1800)) * time.Second
+
+	poolCfg := pty.PoolConfig{
+		SaveBaseDir:       envOr("SAVE_DIR", "/data"),
+		MaxActiveSessions: maxSessions,
+		IdleStartTimeout:  idleStart,
+		InactivityTimeout: inactivity,
+		SessionConfig:     sessionCfg,
 	}
-	cancel()
+
+	pool := pty.NewPool(poolCfg)
+	logger.Printf(
+		"session pool ready: max=%d idle_start=%s inactivity=%s base=%s",
+		maxSessions, idleStart, inactivity, poolCfg.SaveBaseDir,
+	)
 
 	addr := envOr("LISTEN_ADDR", ":8080")
 	adminToken := os.Getenv("ADMIN_TOKEN")
-	server := api.NewServer(manager, adminToken, logger)
+	server := api.NewServer(pool, adminToken, logger)
 
 	httpServer := &http.Server{
 		Addr:              addr,
@@ -50,7 +62,10 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	logger.Printf("shutting down: saving all active sessions")
+	pool.Close()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	_ = httpServer.Shutdown(shutdownCtx)
 }
@@ -58,6 +73,15 @@ func main() {
 func envOr(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if value := os.Getenv(key); value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			return n
+		}
 	}
 	return fallback
 }

@@ -9,13 +9,16 @@ services:
       - ./games/zork1.z3:/game/zork1.z3:ro
     environment:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
+      MAX_ACTIVE_SESSIONS: ${MAX_ACTIVE_SESSIONS:-8}
+      SESSION_IDLE_START_SECONDS: ${SESSION_IDLE_START_SECONDS:-300}
+      SESSION_INACTIVITY_SECONDS: ${SESSION_INACTIVITY_SECONDS:-1800}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 60s
-    mem_limit: 128m
+      start_period: 30s
+    mem_limit: 256m
     logging:
       driver: json-file
       options:

@@ -6,9 +6,14 @@ strip_address() is adapted from ottobot's Ottobot.strip_address()
 
 from __future__ import annotations
 
-COMMAND = "!zork"
-HELP_COMMANDS = frozenset({"!help", "!commands"})
-AUTHOR_COMMAND = "!author"
+# All recognized bot commands (without the leading !).
+BOT_COMMANDS = frozenset({
+    "help", "commands", "author",
+    "start", "end", "list", "watch", "watchers", "reset",
+})
+
+# Legacy !zork prefix — still supported for compatibility.
+_ZORK_PREFIX = "!zork"
 
 
 def strip_address(text: str, bot_name: str) -> tuple[str, bool]:
@@ -27,21 +32,46 @@ def strip_address(text: str, bot_name: str) -> tuple[str, bool]:
     return text, False
 
 
-def parse_zork_command(text: str) -> str | None:
-    """Return argument string after !zork, or None if not a zork command."""
+def parse_command(text: str) -> str | None:
+    """Return handler args for a recognized bot command, or None.
+
+    For a bare `!command` or `!command args`, returns `"command args"`.
+    For the legacy `!zork <game text>` form, returns the game text.
+    Returns None if the text is not a recognized command.
+    """
     text = text.strip()
-    if text == COMMAND:
+    lower = text.lower()
+
+    # Legacy !zork form.
+    if lower == _ZORK_PREFIX:
         return ""
-    if text.startswith(f"{COMMAND} "):
-        return text[len(COMMAND) :].strip()
+    if lower.startswith(f"{_ZORK_PREFIX} "):
+        return text[len(_ZORK_PREFIX) :].strip()
+
+    # General !command form.
+    if text.startswith("!"):
+        parts = text[1:].split(None, 1)
+        if parts:
+            cmd = parts[0].lower()
+            # Normalize aliases.
+            if cmd == "commands":
+                cmd = "help"
+            if cmd in BOT_COMMANDS:
+                rest = parts[1] if len(parts) > 1 else ""
+                return f"{cmd} {rest}".strip() if rest else cmd
+
     return None
 
 
-def parse_command(text: str) -> str | None:
-    """Return handler args for a recognized bot command, or None."""
+def parse_zork_command(text: str) -> str | None:
+    """Return argument string after !zork, or None if not a zork command.
+
+    Kept for compatibility.
+    """
     text = text.strip()
-    if text.lower() in HELP_COMMANDS:
-        return "help"
-    if text.lower() == AUTHOR_COMMAND:
-        return "author"
-    return parse_zork_command(text)
+    lower = text.lower()
+    if lower == _ZORK_PREFIX:
+        return ""
+    if lower.startswith(f"{_ZORK_PREFIX} "):
+        return text[len(_ZORK_PREFIX) :].strip()
+    return None
