@@ -10,21 +10,8 @@ from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
-AUTHOR_TEXT = """Meshcore: phr5\U0001f427
-Discord: @phosphor_radio
-Source: https://github.com/phosphor-radio/zorkbot"""
-
-HELP_TEXT = """\
-Commands (channel or DM):
-!start  — begin / resume your game
-!end    — save & end your game
-!list   — show active sessions
-!watch <N> — observe session N
-!watchers  — list all watchers
-!reset  — (DM only) wipe save & restart
-!end <N>   — (admin) force-end session N
-In your DM: type game commands directly\
-"""
+# Re-exported for bot.py — both start.py and zork.py share these constants.
+from zorkbot.commands.zork import AUTHOR_TEXT, HELP_TEXT  # noqa: E402,F401
 
 
 async def handle_start(

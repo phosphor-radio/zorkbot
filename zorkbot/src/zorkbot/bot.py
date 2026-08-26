@@ -18,6 +18,7 @@ from zorkbot.commands.zork import handle_game_command
 from zorkbot.config import BotConfig
 from zorkbot.context import Context, IncomingMessage, ReplyFunc
 from zorkbot.game_client import GameClient
+from zorkbot.packetize import packetize
 from zorkbot.rate_limit import RateLimiter
 from zorkbot.session_state import SessionState
 
@@ -186,7 +187,8 @@ class ZorkBot:
             await self.advertiser.send_if_due(self.meshcore)
 
         if command in ("help", "commands"):
-            await ctx.reply(HELP_TEXT)
+            packets = packetize(HELP_TEXT, max_chars=ctx.config.packet_max_chars)
+            await ctx.reply_many(packets)
             return
 
         if command == "author":

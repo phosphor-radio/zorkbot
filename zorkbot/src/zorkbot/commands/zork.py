@@ -12,17 +12,11 @@ from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
-HELP_TEXT = """\
-Commands (channel or DM):
-!start  — begin / resume your game
-!end    — save & end your game
-!list   — show active sessions
-!watch <N> — observe session N
-!watchers  — list all watchers
-!reset  — (DM only) wipe save & restart
-!end <N>   — (admin) force-end session N
-In your DM: type game commands directly\
-"""
+# Fits in one 100-char mesh packet.
+HELP_TEXT = (
+    "!start/!end — begin/end game  !list  !watch <N>  !watchers  !reset (DM)\n"
+    "DM: type game commands"
+)
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
 Discord: @phosphor_radio
