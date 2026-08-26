@@ -86,13 +86,9 @@ class GameClient:
 
     async def reset_session(self, player_id: str) -> None:
         """Wipe save and restart a fresh session for player_id."""
-        headers = {}
-        if self.admin_token:
-            headers["X-Admin-Token"] = self.admin_token
         response = await self._request(
             "DELETE",
             f"/sessions/{player_id}/save",
-            headers=headers,
         )
         payload = response.json()
         if not payload.get("ok", False):

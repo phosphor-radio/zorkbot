@@ -66,10 +66,9 @@ async def test_reset_session_success() -> None:
     route = respx.delete(f"http://game:8080/sessions/{PLAYER}/save").mock(
         return_value=httpx.Response(200, json={"ok": True})
     )
-    async with GameClient("http://game:8080", admin_token="secret") as client:
+    async with GameClient("http://game:8080") as client:
         await client.reset_session(PLAYER)
     assert route.called
-    assert route.calls.last.request.headers["X-Admin-Token"] == "secret"
 
 
 @pytest.mark.asyncio

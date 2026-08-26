@@ -203,18 +203,13 @@ func (s *Server) handleEndSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /sessions/{player_id}/save — reset: wipe save + start fresh.
+// No admin token required — the bot enforces DM-only, own-session restriction
+// at the command level; player_id format validation provides path safety.
 func (s *Server) handleResetSession(w http.ResponseWriter, r *http.Request) {
 	playerID := r.PathValue("player_id")
 	if err := pty.ValidatePlayerID(playerID); err != nil {
 		writeJSON(w, http.StatusBadRequest, sessionResponse{OK: false, Error: err.Error()})
 		return
-	}
-
-	if s.adminToken != "" {
-		if r.Header.Get("X-Admin-Token") != s.adminToken {
-			writeJSON(w, http.StatusUnauthorized, sessionResponse{OK: false, Error: "unauthorized"})
-			return
-		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
