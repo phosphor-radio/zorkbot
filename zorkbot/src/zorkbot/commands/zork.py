@@ -12,12 +12,16 @@ from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
-# Fits in two 120-char mesh packets (also two at 100-char limit).
-HELP_TEXT = (
-    "!start — begin or resume  !end — save & quit  !list — active sessions\n"
-    "!watch <N> — observe  !watchers — list observers  !reset (DM) — wipe & restart\n"
-    "DM me: just type your game commands"
-)
+# One line per command — sent as individual messages so newlines are preserved.
+HELP_TEXT = "\n".join([
+    "!start — begin or resume game",
+    "!end — save & quit",
+    "!list — active sessions",
+    "!watch <N> — observe a session",
+    "!watchers — list all observers",
+    "!reset (DM only) — wipe save & restart",
+    "DM me: just type your game commands",
+])
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
 Discord: @phosphor_radio
