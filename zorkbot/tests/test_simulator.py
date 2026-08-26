@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import respx
 
 from zorkbot.advertiser import Advertiser
 from zorkbot.bot import ZorkBot
@@ -16,9 +17,7 @@ def _make_bot(config: BotConfig, game: GameClient) -> ZorkBot:
     mc.get_contact_by_key_prefix = MagicMock(return_value=None)
     advertiser = Advertiser()
     advertiser.send_if_due = AsyncMock()
-    bot = ZorkBot(config, game, advertiser, mc)
-    bot.set_send_dm(AsyncMock())
-    return bot
+    return ZorkBot(config, game, advertiser, mc)
 
 
 @pytest.mark.asyncio
@@ -67,3 +66,30 @@ async def test_simulator_control_quit() -> None:
         lines = await sim.handle_line("/quit")
     assert sim.done is True
     assert any("bye" in line.lower() for line in lines)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_simulator_start_channel_shows_dm() -> None:
+    """!start on channel should show both the channel ack and the DM intro."""
+    import httpx
+
+    config = BotConfig(game_url="http://game:8080", rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    # Meshcore that has the player in its contact table so !start can proceed.
+    mc = MagicMock()
+    mc.get_contact_by_key_prefix = MagicMock(return_value={"adv_name": "you"})
+    advertiser = Advertiser()
+    advertiser.send_if_due = AsyncMock()
+
+    async with GameClient(config.game_url) as game:
+        bot = ZorkBot(config, game, advertiser, mc)
+        sim = Simulator(bot)
+        lines = await sim.handle_line("!start")
+
+    # Channel ack visible.
+    assert any("Session #1" in line for line in lines), lines
+    # DM intro also visible.
+    assert any("[DM" in line for line in lines), lines

@@ -98,7 +98,13 @@ class _StubMeshCore:
     """Minimal stub for simulate mode (no real radio)."""
 
     def get_contact_by_key_prefix(self, pubkey_prefix: str) -> dict | None:
-        return {"adv_name": "simuser"}
+        # Try to reverse the hex-encoded name the simulator derives from /name.
+        # Falls back to the 8-char prefix if decoding fails.
+        try:
+            name = bytes.fromhex(pubkey_prefix.rstrip("0")).decode()
+        except (ValueError, UnicodeDecodeError):
+            name = pubkey_prefix[:8]
+        return {"adv_name": name}
 
     class commands:
         @staticmethod

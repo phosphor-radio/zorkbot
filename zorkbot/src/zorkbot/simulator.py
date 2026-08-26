@@ -33,6 +33,22 @@ class Simulator:
         self.pubkey_prefix = _DEFAULT_PUBKEY
         self.channel_idx = bot.config.channel.index
         self.done = False
+        # Wire up DM sends so they appear in simulator output.
+        bot.set_send_dm(self._on_dm_send)
+        # Buffer for DMs that arrive outside a handle_line call (e.g. from
+        # watcher fan-out or inactivity notifications).
+        self._pending_dms: list[str] = []
+
+    async def _on_dm_send(self, pubkey_prefix: str, text: str) -> None:
+        """Capture outgoing DMs and add them to the pending display buffer."""
+        # Resolve a display name for the recipient.
+        name = pubkey_prefix[:8]
+        mc = getattr(self.bot, "meshcore", None)
+        if mc is not None:
+            contact = getattr(mc, "get_contact_by_key_prefix", lambda _: None)(pubkey_prefix)
+            if contact:
+                name = contact.get("adv_name", name)
+        self._pending_dms.append(f"[DM → {name}] {text}")
 
     @property
     def prompt(self) -> str:
@@ -64,6 +80,7 @@ class Simulator:
             return await self._control(line[1:])
 
         replies: list[str] = []
+        self._pending_dms.clear()
 
         async def reply(text: str) -> None:
             replies.append(text)
@@ -77,14 +94,19 @@ class Simulator:
             await self.bot.dispatch_channel(message, reply)
 
         await self.bot.drain()
-        if not replies:
+
+        # Merge channel replies and any DMs that were sent during handling.
+        all_replies = replies + self._pending_dms
+        self._pending_dms.clear()
+
+        if not all_replies:
             return ["(no response)"]
 
         out: list[str] = []
-        for text in replies:
+        for text in all_replies:
             first, *rest = text.split("\n")
             out.append(f"bot> {first}")
-            out.extend(f"  {extra}" for extra in rest)
+            out.extend(f"     {extra}" for extra in rest if extra)
         return out
 
     async def _control(self, body: str) -> list[str]:
