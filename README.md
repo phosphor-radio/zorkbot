@@ -1,69 +1,79 @@
 # Zorkbot
 
-MeshCore radio bot for a shared game of Zork I. Players on `#zork` send commands over the mesh; the bot forwards them to a single game world and replies with output split into ~100-character packets.
-
-Everyone shares one game state. Commands are processed one at a time.
+MeshCore radio bot for personal sessions of Zork I. Each player gets their own private game world communicated via DMs. The `#zork` channel is a lobby for starting games and watching others play.
 
 ## About Zork
 
 ### What it is
 
-[Zork I](https://en.wikipedia.org/wiki/Zork_I) is a classic text adventure: you explore the Great Underground Empire, solve puzzles, collect treasures, and try not to get eaten by a grue. You type short English commands; the game replies with prose. There are no graphics — the map and objects exist only in the text.
-
-On `#zork`, every player shares **one** game world. What one person takes or opens affects everyone else.
+[Zork I](https://en.wikipedia.org/wiki/Zork_I) is a classic text adventure: you explore the Great Underground Empire, solve puzzles, collect treasures, and try not to get eaten by a grue. You type short English commands; the game replies with prose.
 
 ### How to play
 
-Prefix game commands with `!zork` on the mesh (see [Mesh commands](#mesh-commands) below). Examples:
+1. On `#zork`, send `!start` — the bot sends a DM confirming your session.
+2. From that point, **DM the bot** with game commands directly (no prefix needed).
+3. Send `!end` to save your game; `!start` again later to resume it.
 
 | Kind | Examples |
 | ---- | -------- |
-| Look around | `!zork look` (or `l`) |
-| Move | `!zork north`, `!zork go east` (short forms: `n`, `s`, `e`, `w`, `u`, `d`) |
-| Take and use things | `!zork take lamp`, `!zork open mailbox`, `!zork read leaflet` |
-| Inventory | `!zork inventory` (or `i`) |
-| Other verbs | `drop`, `put`, `examine`, `unlock`, `light`, `attack`, … — try what seems natural |
+| Look around | `look` (or `l`) |
+| Move | `north`, `go east` (short forms: `n`, `s`, `e`, `w`, `u`, `d`) |
+| Take and use | `take lamp`, `open mailbox`, `read leaflet` |
+| Inventory | `inventory` (or `i`) |
+| Other verbs | `drop`, `put`, `examine`, `unlock`, `light`, `attack`, … |
 
-The parser understands many synonyms (`get` / `take`, `x` / `examine`). If stuck, `!zork look` is almost always safe.
+The parser understands many synonyms. If stuck, `look` is always safe.
 
-**Room descriptions:** Zork prints the **full** description of a location only the **first** time you enter it. When you return, you usually get a one-line summary (e.g. *"Forest"*). Use `!zork look` anytime to see the complete description again — especially useful on mesh, where you may have missed earlier packets or joined mid-game.
+**Room descriptions:** Zork prints the **full** description of a location only the **first** time you enter it. On return you get a one-line summary. Use `look` to see the full description again.
 
 ### Brief history
 
-Zork began at MIT in the late 1970s as *Dungeon*, inspired by early cave-exploration games. Infocom refined and published it as **Zork I: The Great Underground Empire** in 1980. It helped define interactive fiction and shipped on mainframes, personal computers, and later every platform that could run a [Z-machine](https://en.wikipedia.org/wiki/Zork_Machine) interpreter. This project runs the original story file (`zork1.z3`) through [encrusted](https://github.com/DeMille/encrusted), a modern Z-machine interpreter.
+Zork began at MIT in the late 1970s as *Dungeon*, inspired by early cave-exploration games. Infocom published **Zork I** in 1980. This project runs the original story file (`zork1.z3`) through [encrusted](https://github.com/DeMille/encrusted), a modern Z-machine interpreter.
 
 ### Playing over MeshCore
 
-LoRa mesh is slow and message-sized (~140 characters on the wire). Zorkbot is built to keep traffic down:
+LoRa mesh is slow and packet-sized (~140 characters on the wire). Zorkbot is built to keep traffic down:
 
-- **Packetized replies** — Game output is split into ~100-character packets on word boundaries, with `(1/n)` markers when a reply spans multiple messages.
-- **One command at a time** — A queue serializes play so the shared world stays consistent and the channel is not flooded with overlapping output.
-- **Per-sender rate limit** — Default 3 seconds between commands from the same player (configurable).
-- **Spacing between sends** — The bot waits between outbound packets so radios and repeaters can keep up.
-- **No reply prefixes** — Channel replies omit per-player `@[name]` tags to save characters per packet.
-- **Quiet startup** — The bot does not announce on channel by default when it starts (`announce_on_start = false`).
-- **Filtered input** — Debug and interpreter meta-commands (e.g. `$`-prefixed encrusted commands) are blocked so they cannot spam the mesh or corrupt the session.
-
-Expect long room descriptions and puzzle feedback to arrive as several short messages. If output feels thin, run `!zork look`.
+- **DM sessions** — Game output goes only to the player (and watchers), not the whole channel.
+- **Packetized replies** — Output is split into 120-character packets on word boundaries, with `(1/n)` markers when a reply spans multiple messages.
+- **Per-player queues** — Each player has their own command queue; one player's slow commands don't block others.
+- **Per-player rate limit** — Default 3 seconds between commands from the same player.
+- **Spaced RF sends** — All outgoing transmissions (DMs and channel messages) share a single send gate with configurable spacing (default 2 s) so radios and repeaters can keep up.
+- **Quiet startup** — No startup announcement on channel by default.
+- **Filtered input** — Debug and meta-commands (e.g. `$`-prefixed encrusted commands) are blocked.
 
 ## Architecture
 
-Two services, typically run together with Docker Compose on a Raspberry Pi:
+Two services run together with Docker Compose on a Raspberry Pi:
 
 ```
-Mesh radios  →  zorkbot (Python)  →  game / zorkd (Go)  →  encrusted (Z-machine)
-                     ↑                      ↑
-              MeshCore serial          HTTP on Docker network
+Mesh radios ──CHANNEL_MSG_RECV──► zorkbot (Python) ──HTTP──► game / zorkd (Go) ──PTY──► encrusted
+            ──CONTACT_MSG_RECV──►    │                              │
+                                     │                        SessionPool
+                                     │                        per-player Manager
+                                     │                        /data/<pubkey_prefix>/
+                                     ▼
+                              advertiser (periodic send_advert)
 ```
 
+| Component | Role |
+| --------- | ---- |
+| **zorkbot** | Mesh I/O, per-player queues, DM routing, watcher fan-out, advertising |
+| **game (zorkd)** | `SessionPool` — multiple [encrusted](https://github.com/DeMille/encrusted) sessions behind a Go HTTP API |
 
-| Component        | Role                                                                                      |
-| ---------------- | ----------------------------------------------------------------------------------------- |
-| **zorkbot**      | Mesh I/O, command parsing, input filtering, packetization, admin checks                   |
-| **game (zorkd)** | Long-lived [encrusted](https://github.com/DeMille/encrusted) session behind a Go HTTP API |
+### Session pool
 
+The `game` service runs up to `MAX_ACTIVE_SESSIONS` (default 8) PTY processes simultaneously. Each is keyed by the player's `pubkey_prefix` (12 hex chars from the MeshCore radio key). Save files live in `/data/<pubkey_prefix>/`. Sessions that sit idle are automatically saved and unloaded.
 
-The game service talks to encrusted over a PTY so the interpreter gets normal terminal behavior. Save files live in `data/saves/`. The story file `games/zork1.z3` is mounted at runtime (not committed to the repo).
+### Player identity
+
+Both `CHANNEL_MSG_RECV` and `CONTACT_MSG_RECV` events carry `pubkey_prefix` — a cryptographic identifier derived from the node's private key. It is used as the session key throughout and cannot be spoofed.
+
+### Advert requirement for DMs
+
+MeshCore DMs require the recipient's public key to be in the firmware's contact table, which is populated when an advertisement is received. The bot sends a periodic `send_advert(flood=True)` so players can add it to their contacts. On every `!start`, the bot also sends an advert if the cooldown has elapsed.
+
+If a player issues `!start` on the channel but the bot has not received their advert yet, it replies: *"DM me !start — I don't have you in my contacts yet."*
 
 ## Prerequisites
 
@@ -71,8 +81,6 @@ The game service talks to encrusted over a PTY so the interpreter gets normal te
 - `zork1.z3` from [historicalsource/zork1](https://github.com/historicalsource/zork1) → `games/zork1.z3`
 - MeshCore radio on USB serial (for production)
 - For local development without Docker: Go 1.23+, Python 3.13+, and encrusted installed
-
-
 
 ## Deploy on a Raspberry Pi
 
@@ -105,53 +113,41 @@ Edit `.env`:
 
 Edit `zorkbot/zorkbot.toml`:
 
-- Set `[admin].names` to your mesh name(s).
+- Set `[admin].pubkeys` to your `pubkey_prefix` (12 hex chars — send `!list` to find yours).
 - Confirm `[channel]` index/name match your `#zork` channel.
 
-`game_url` in TOML should stay `http://game:8080` for Compose (the Docker service name). See [Configuration](#configuration) for all settings.
+`game_url` in TOML should stay `http://game:8080` for Compose. See [Configuration](#configuration) for all settings.
 
 ### Stable serial device (udev)
 
-USB serial ports often move between `/dev/ttyUSB0` and `/dev/ttyACM0` across reboots. Create a udev symlink so Compose always sees `/dev/meshcore`:
+USB serial ports often move between `/dev/ttyUSB0` and `/dev/ttyACM0` across reboots. Create a udev symlink:
 
 ```bash
-# Find the device (with radio plugged in)
 ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
-
-# Get vendor/product IDs
 udevadm info -a -n /dev/ttyUSB0 | grep -E '{idVendor}|{idProduct}|{serial}'
 ```
 
-Edit `deploy/udev/99-meshcore.rules` with your device's `idVendor` and `idProduct`, then install:
+Edit `deploy/udev/99-meshcore.rules` with your device's IDs, then install:
 
 ```bash
 sudo cp deploy/udev/99-meshcore.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-Unplug and replug the radio. Confirm:
-
-```bash
-ls -l /dev/meshcore
-```
-
-If you skip udev, set `MESHCORE_DEVICE` and `MESHCORE_CONTAINER_DEVICE` in `.env` to the actual path (e.g. `/dev/ttyACM0`).
+If you skip udev, set `MESHCORE_DEVICE` in `.env` to the actual path (e.g. `/dev/ttyACM0`).
 
 ### Serial permissions
 
-The zorkbot container is added to the host **dialout** group (`MESHCORE_GROUP_GID`, default `20`). On Debian/Raspberry Pi OS:
+The zorkbot container is added to the host **dialout** group (`MESHCORE_GROUP_GID`, default `20`). If your dialout GID differs:
 
 ```bash
 getent group dialout
+# update MESHCORE_GROUP_GID in .env
 ```
-
-If your dialout GID differs, update `MESHCORE_GROUP_GID` in `.env`.
 
 ### Build on the Pi
 
-The **game** image compiles encrusted from source (Rust). On a Pi Zero or other low-RAM board, a parallel build can exhaust memory and kill SSH or your shell mid-build.
-
-**Before the first build**, add swap if the Pi has 1 GB RAM or less:
+The **game** image compiles encrusted from source (Rust). On a Pi Zero, add swap first:
 
 ```bash
 sudo dphys-swapfile swapoff
@@ -159,61 +155,36 @@ sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
 sudo dphys-swapfile setup && sudo dphys-swapfile swapon
 ```
 
-Build **one service at a time** instead of `docker compose up -d --build`:
+Build one service at a time:
 
 ```bash
 export COMPOSE_PARALLEL_LIMIT=1
-
-# Detached build survives SSH disconnect (check ~/build-game.log)
 nohup docker compose build game > ~/build-game.log 2>&1 &
 tail -f ~/build-game.log
-
 docker compose build zorkbot
 ```
 
-The `game` Dockerfile serializes the Rust and Go compile steps and limits Rust parallelism (`CARGO_BUILD_JOBS=1`) to reduce peak RAM. The first `game` build on a Pi Zero can still take an hour or more.
-
-Prefer [cross-building on another machine](#cross-build-on-another-machine) if you have a desktop or laptop available.
+The first `game` build on a Pi Zero can take an hour or more. Prefer [cross-building](#cross-build-on-another-machine) if you have a faster machine.
 
 ### Cross-build on another machine
 
-Build `linux/arm64` images on a faster host with Docker Buildx, transfer them to the Pi, and start Compose without compiling on the Pi.
+Build `linux/arm64` images on a faster host, transfer to the Pi, and start Compose without compiling on the Pi.
 
-Compose tags built images as `{project}-{service}` (default project name is the repo directory: `zorkbot-game`, `zorkbot-zorkbot`). Use the same names when cross-building.
-
-#### On the build machine (one-time setup)
-
-Install Docker with Buildx. On Linux amd64, enable QEMU so Buildx can target arm64:
+#### One-time setup on the build machine
 
 ```bash
 docker buildx create --name zorkbot-builder --driver docker-container --use 2>/dev/null \
   || docker buildx use zorkbot-builder
 docker buildx inspect --bootstrap
-docker run --privileged --rm tonistiigi/binfmt --install all
+docker run --privileged --rm tonistiigi/binfmt --install all   # Linux amd64 only
 ```
-
-Apple Silicon Macs and arm64 Linux hosts can skip the `binfmt` step; still pass `--platform linux/arm64` so images match the Pi.
 
 #### Build images
 
-From the repo root on the build machine:
-
 ```bash
-git clone https://github.com/phosphor-radio/zorkbot.git
-cd zorkbot
-
-docker buildx build --platform linux/arm64 \
-  -t zorkbot-game:latest \
-  --load \
-  ./game
-
-docker buildx build --platform linux/arm64 \
-  -t zorkbot-zorkbot:latest \
-  --load \
-  ./zorkbot
+docker buildx build --platform linux/arm64 -t zorkbot-game:latest    --load ./game
+docker buildx build --platform linux/arm64 -t zorkbot-zorkbot:latest --load ./zorkbot
 ```
-
-`--load` imports the image into the local Docker engine so you can `docker save` it. The `game` build compiles encrusted for `linux/arm64` using QEMU emulation (the Rust stage cannot cross-compile without a cross-linker). Expect the `game` build to take 20–60 minutes on a desktop even with QEMU. The `zorkbot` build is Python and finishes quickly.
 
 #### Transfer to the Pi
 
@@ -221,8 +192,6 @@ docker buildx build --platform linux/arm64 \
 docker save zorkbot-game:latest zorkbot-zorkbot:latest | gzip > zorkbot-images-arm64.tar.gz
 scp zorkbot-images-arm64.tar.gz pi@pizero.local:~/zorkbot/
 ```
-
-Copy config and story file if the Pi does not have them yet (`games/zork1.z3`, `.env`, `zorkbot/zorkbot.toml`).
 
 #### On the Pi
 
@@ -232,28 +201,7 @@ gunzip -c zorkbot-images-arm64.tar.gz | docker load
 docker compose up -d --no-build
 ```
 
-`--no-build` tells Compose to use the loaded images instead of building from source. If your checkout lives in a directory other than `zorkbot`, set `COMPOSE_PROJECT_NAME=zorkbot` so service names match the image tags.
-
-#### Updates via cross-build
-
-Rebuild on the desktop, `docker save`, copy the tarball to the Pi, `docker load`, then:
-
-```bash
-docker compose up -d --no-build
-```
-
-#### Optional: registry instead of `scp`
-
-Push from the build machine:
-
-```bash
-docker tag zorkbot-game:latest ghcr.io/YOU/zorkbot-game:latest
-docker tag zorkbot-zorkbot:latest ghcr.io/YOU/zorkbot-zorkbot:latest
-docker push ghcr.io/YOU/zorkbot-game:latest
-docker push ghcr.io/YOU/zorkbot-zorkbot:latest
-```
-
-On the Pi, add `image:` lines for those tags (or retag after `docker pull`) and run `docker compose up -d --no-build`.
+`--no-build` tells Compose to use the loaded images. If your checkout directory is not `zorkbot`, set `COMPOSE_PROJECT_NAME=zorkbot`.
 
 ### Start the stack
 
@@ -263,29 +211,33 @@ docker compose ps
 docker compose logs -f zorkbot
 ```
 
-The **game** service is only reachable on the Docker network (`http://game:8080`). It is not published to the LAN.
-
-On first start, zorkbot waits for the game health check, applies mesh settings, and listens on the configured `#zork` channel.
+The **game** service is only reachable on the Docker network. It is not published to the LAN.
 
 ### Verify
 
 ```bash
-# Game health (from the Pi host, via docker exec)
+# Game health
 docker compose exec game wget -q -O- http://localhost:8080/health
 
-# Bot logs should show channel subscription
-docker compose logs zorkbot | tail
+# Active sessions
+docker compose exec game wget -q -O- http://localhost:8080/sessions | python3 -m json.tool
+
+# Bot logs
+docker compose logs zorkbot | tail -20
+
+# Follow a single player's activity (replace <prefix> with 8 hex chars)
+docker compose logs zorkbot | grep player=<prefix>
 ```
 
-On mesh, send `!zork look` on `#zork`.
+On mesh, send `!help` on `#zork`, then `!start` to begin a session.
 
 ### Volumes
 
 | Host path | Container | Purpose |
 | --------- | --------- | ------- |
-| `./data/saves` | `/data` (game) | encrusted save files |
+| `./data/saves` | `/data` (game) | Per-player save directories (`<pubkey_prefix>/`) |
 | `./games/zork1.z3` | `/game/zork1.z3` (game) | Zork I story file (read-only) |
-| `./zorkbot/zorkbot.toml` | `/app/zorkbot.toml` (zorkbot) | bot config (read-only) |
+| `./zorkbot/zorkbot.toml` | `/app/zorkbot.toml` (zorkbot) | Bot config (read-only) |
 
 Protect save data on the Pi:
 
@@ -305,128 +257,145 @@ docker compose build zorkbot
 docker compose up -d
 ```
 
-**Cross-built images:** rebuild on the desktop, transfer with `docker save` / `scp` / `docker load`, then `docker compose up -d --no-build` on the Pi.
+**Cross-built images:** rebuild on the desktop, transfer, `docker load`, then `docker compose up -d --no-build`.
 
-## Mesh commands
+## Commands
 
-On `#zork`, no bot mention is required. You may also prefix any command with `@[zorkbot]`.
+On `#zork`, no bot mention is required. You may also prefix any command with `@[zorkbot]`. Game commands are sent directly in a DM with no prefix.
 
+### Lobby (`#zork` channel or DM)
 
-| Command                            | Who      | Action                          |
-| ---------------------------------- | -------- | ------------------------------- |
-| `!zork <text>`                     | Everyone | Send a game command             |
-| `!zork`                            | Everyone | Bot status (uptime, busy/ready) |
-| `!zork help`, `!help`, `!commands` | Everyone | Bot help text                   |
-| `!author`                          | Everyone | Author / project links          |
-| `!zork save`                       | Admin    | Trigger encrusted `save`        |
-| `!zork restore`                    | Admin    | Trigger encrusted `restore`     |
-| `!zork reset`                      | Admin    | Restart the game                |
-| `!zork quit`                       | Admin    | Quit the game session           |
+| Command | Who | Action |
+| ------- | --- | ------ |
+| `!help` / `!commands` | Everyone | Command reference |
+| `!author` | Everyone | Author / project links |
+| `!start` | Everyone | Begin or resume your session |
+| `!end` | Everyone | Save and end your session (or stop watching) |
+| `!list` | Everyone | List active sessions |
+| `!watch <N>` | Everyone | Observe session N via DMs |
+| `!watchers` | Everyone | List all observers and which session they watch |
+| `!end <N>` | Admin | Force-end session N |
 
+### In a DM session
 
-Examples:
+| Input | Action |
+| ----- | ------ |
+| `look`, `go north`, `take lamp`, … | Game command (any bare text) |
+| `!start` | Begin or resume your session |
+| `!end` | Save and end your session |
+| `!reset` | Wipe save file and start fresh immediately |
+
+### Session lifecycle
 
 ```
-!zork look
-!zork take lamp
-!help
-!author
-@[zorkbot] !zork go north
+[none] ──!start (fresh)──► [active] ──!end / idle timeout──► [saved]
+[saved] ──!start (restore)──► [active]
+[active] ──!reset──► [active]  (wipe save, restart)
+[any] ──!watch <N>──► [watching] ──!end──► [none/saved]
 ```
 
-The bot queues commands and processes them serially. If the queue is full, you get *"The game is busy, try again."* A per-sender rate limit (default 3 seconds) returns *"Slow down — try again in a moment."*
+- **active** — PTY running, session has a number, watchers can attach
+- **watching** — observing another session via DMs; no active PTY of own
+- **saved** — save file on disk, no PTY; restored on next `!start`
+- **none** — no save, not watching
+
+A player can only be in one state at a time — playing or watching, never both.
+
+### Watcher output
+
+Observers receive the command followed by the game response:
+
+```
+[Alice] > go north
+You are in a dark forest...
+```
 
 ## Configuration
 
-
-
 ### Environment (`.env`)
 
-
-| Variable                    | Purpose                                             |
-| --------------------------- | --------------------------------------------------- |
-| `ADMIN_TOKEN`               | Shared secret for admin commands (required)         |
-| `MESHCORE_DEVICE`           | Host serial device path (default `/dev/meshcore`)   |
-| `MESHCORE_CONTAINER_DEVICE` | Device path inside the container                    |
-| `MESHCORE_GROUP_GID`        | Host `dialout` group GID (default `20`)             |
-| `ZORKBOT_CONFIG`            | Path to bot TOML (default `./zorkbot/zorkbot.toml`) |
-
-
-
+| Variable | Purpose |
+| -------- | ------- |
+| `ADMIN_TOKEN` | Shared secret for game API (required) |
+| `MESHCORE_DEVICE` | Host serial device path (default `/dev/meshcore`) |
+| `MESHCORE_CONTAINER_DEVICE` | Device path inside the container |
+| `MESHCORE_GROUP_GID` | Host `dialout` group GID (default `20`) |
+| `ZORKBOT_CONFIG` | Path to bot TOML (default `./zorkbot/zorkbot.toml`) |
+| `MAX_ACTIVE_SESSIONS` | Override max concurrent sessions (default `8`) |
+| `SESSION_IDLE_START_SECONDS` | Override idle-start timeout (default `300`) |
+| `SESSION_INACTIVITY_SECONDS` | Override inactivity timeout (default `1800`) |
 
 ### Bot config (`zorkbot/zorkbot.toml`)
 
-Copy from `zorkbot/zorkbot.toml.example`. Important settings:
-
 ```toml
 name = "zorkbot"
-game_url = "http://game:8080"   # use this URL in Docker; http://localhost:8080 for local dev
+game_url = "http://game:8080"   # Docker; use http://localhost:8080 for local dev
+
+packet_max_chars = 120          # max chars per outgoing radio message
+announce_on_start = false
+rate_limit_seconds = 3.0
+
+# Session management
+max_active_sessions = 8         # max concurrent PTY processes
+max_watchers_per_session = 2    # observers per session
+session_inactivity_seconds = 1800   # auto-save after 30 min idle
+session_idle_start_seconds = 300    # release slot if no command in 5 min
+
+# Advertising
+advert_interval_seconds = 300   # background advert timer
+advert_cooldown_seconds = 300   # min gap between adverts
+
+# RF send serialization
+send_spacing_seconds = 2.0      # min gap between radio transmissions
+max_send_queue_depth = 64       # max queued packets before drops
 
 [channel]
 index = 1
 name = "#zork"
 
 [admin]
-names = ["your-mesh-name"]
-
-# Optional
-# packet_max_chars = 100
-# announce_on_start = false
-# command_queue_size = 8
-# rate_limit_seconds = 3.0
+pubkeys = ["aabbccddeeff"]      # 12-char hex pubkey_prefix of admin users
 ```
 
 `ADMIN_TOKEN` in the environment overrides `admin_token` in TOML. Keep secrets out of git.
 
 ## Admin access
 
-Mesh sender names are **spoofable**. Treat `admin.names` as convenience only. Use `ADMIN_TOKEN` for sensitive operations.
+Admin commands are authenticated by **`pubkey_prefix`** — a cryptographic identifier derived from the node's private key that cannot be spoofed. Set `[admin].pubkeys` in `zorkbot.toml` to your 12-char hex pubkey prefix.
 
-Set the same token for both services:
+To find your prefix: send any command to the bot and check `docker compose logs zorkbot` for `player=<prefix8>`, or look in the MeshCore app for your node's key.
 
-```bash
-# .env (Compose) or shell
-ADMIN_TOKEN="choose-a-long-random-secret"
-```
+Admin commands:
+- `!end <N>` — force-end any session by number (DM only)
 
-On `#zork`:
-
-```
-!zork save
-!zork restore
-!zork reset
-```
-
-With a token (works without being in `admin.names`):
-
-```
-!zork save choose-a-long-random-secret
-!zork reset choose-a-long-random-secret
-```
-
-
+The `ADMIN_TOKEN` HTTP header is retained for direct `game` API calls (e.g. curl from the Pi).
 
 ## Local development
 
-
-
-### Game service only (Docker)
+### Game service (Docker)
 
 ```bash
 cp /path/to/zork1.z3 games/zork1.z3
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build game
 ```
 
-The dev override publishes port `8080` on localhost.
-
 ```bash
-curl -s http://localhost:8080/health
-curl -s http://localhost:8080/command \
+# Start a session
+curl -s http://localhost:8080/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"player_id":"aabbccddeeff"}' | jq .
+
+# Send a command
+curl -s http://localhost:8080/sessions/aabbccddeeff/command \
   -H 'Content-Type: application/json' \
   -d '{"text":"look"}' | jq .
+
+# List sessions
+curl -s http://localhost:8080/sessions | jq .
+
+# End session
+curl -s -X DELETE http://localhost:8080/sessions/aabbccddeeff | jq .
 ```
-
-
 
 ### Game service (native Go)
 
@@ -441,34 +410,41 @@ LISTEN_ADDR=127.0.0.1:8080 \
 ./zorkd
 ```
 
-
-
 ### Bot simulator
+
+The simulator runs the bot in memory against the game service. Channel messages are entered normally; prefix with `dm:` for DM messages.
 
 ```bash
 cd zorkbot
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
-GAME_URL=http://localhost:8080 ADMIN_TOKEN=dev .venv/bin/zorkbot --simulate
-# > !zork look
-# > /name your-mesh-name
-# > /quit
+GAME_URL=http://localhost:8080 .venv/bin/zorkbot --simulate --config zorkbot.toml
 ```
 
+```
+you@ch1> !help            ← channel command
+you@ch1> !start           ← starts session, shows DM intro
+you@ch1> dm:!start        ← same via DM
+you@ch1> dm:look          ← bare text in DM = game command
+you@ch1> dm:!end
+you@ch1> /name alice      ← switch to a different simulated player
+you@ch1> dm:!start        ← alice starts her own session
+you@ch1> !watch 1         ← watch session 1 as alice
+you@ch1> /quit
+```
 
+Outgoing DMs appear as `bot> [DM → <name>] ...` so you can see both sides of the conversation.
 
 ### Bot on a serial device
 
 ```bash
-ADMIN_TOKEN=dev .venv/bin/zorkbot --serial /dev/ttyACM0 --config zorkbot.toml
+.venv/bin/zorkbot --serial /dev/ttyACM0 --config zorkbot.toml
 ```
 
 Connection options: `--serial`, `--ble ADDRESS`, or `--tcp HOST:PORT`.
 
 ## Build and test
-
-
 
 ### Python (zorkbot)
 
@@ -479,8 +455,6 @@ python3 -m venv .venv
 .venv/bin/pytest
 ```
 
-
-
 ### Go (game)
 
 ```bash
@@ -489,53 +463,47 @@ go test ./...
 go build -o zorkd ./cmd/zorkd
 ```
 
-
-
 ### Compose config
 
 ```bash
 ADMIN_TOKEN=test docker compose config
 ```
 
-
-
 ## Game API
 
-Used by the bot over the Docker network. Not intended for public exposure.
+Used by the bot over the Docker network. Not intended for public exposure. `player_id` must be exactly 12 lowercase hex characters (the `pubkey_prefix`).
 
-
-| Endpoint        | Description                                   |
-| --------------- | --------------------------------------------- |
-| `GET /health`   | 200 when the encrusted session is alive       |
-| `GET /status`   | Uptime and busy state                         |
-| `POST /command` | `{"text":"look","admin":false}` → game output |
-| `POST /reset`   | Restart game; requires `X-Admin-Token` header |
-
-
-
+| Method | Path | Body / Notes | Purpose |
+| ------ | ---- | ------------ | ------- |
+| `GET` | `/health` | — | 200 while pool is running |
+| `POST` | `/sessions` | `{"player_id":"..."}` | Start or restore session |
+| `GET` | `/sessions` | — | List active sessions |
+| `POST` | `/sessions/{player_id}/command` | `{"text":"..."}` | Send game command |
+| `DELETE` | `/sessions/{player_id}` | — | Save and end session |
+| `DELETE` | `/sessions/{player_id}/save` | — | Reset: wipe save + start fresh |
 
 ## Troubleshooting
 
-
-| Symptom                   | Check                                                        |
-| ------------------------- | ------------------------------------------------------------ |
-| `set ADMIN_TOKEN in .env` | Copy `.env.example` to `.env` and set a token                |
-| Bot can't open serial     | `ls -l $MESHCORE_DEVICE`, udev symlink, `MESHCORE_GROUP_GID` |
-| Game unhealthy            | `docker compose logs game`; confirm `games/zork1.z3` exists  |
-| Bot ignores commands      | `[channel].index` in TOML vs actual mesh channel slot        |
-| Build kills SSH / shell   | Low RAM; add swap, build with `COMPOSE_PARALLEL_LIMIT=1`; see [Build on the Pi](#build-on-the-pi) |
-| SD card filling with logs | Compose caps logs at 10 MB × 3 files per service             |
-
-
-
+| Symptom | Check |
+| ------- | ----- |
+| `set ADMIN_TOKEN in .env` | Copy `.env.example` to `.env` and set a token |
+| Bot can't open serial | `ls -l $MESHCORE_DEVICE`, udev symlink, `MESHCORE_GROUP_GID` |
+| Game unhealthy | `docker compose logs game`; confirm `games/zork1.z3` exists |
+| Bot ignores channel messages | `[channel].index` in TOML vs actual mesh channel slot |
+| `!start` says "not in contacts" | Send `!start` via DM instead; or wait for next advert cycle |
+| Session slot full | Increase `max_active_sessions` or wait for idle sessions to time out |
+| Build kills SSH / shell | Low RAM; add swap and use `COMPOSE_PARALLEL_LIMIT=1` |
+| SD card filling with logs | Compose caps logs at 10 MB × 3 files per service |
+| Follow one player in logs | `docker compose logs zorkbot \| grep player=<prefix8>` |
 
 ## Repository layout
 
 ```
-game/           Go HTTP wrapper (zorkd) around encrusted
-zorkbot/        Python MeshCore bot
+game/           Go HTTP wrapper (zorkd) + SessionPool around encrusted
+zorkbot/        Python MeshCore bot (per-player sessions, DM routing)
+docs/specs/     Feature specifications
 games/          Story file mount point (zork1.z3 not committed)
-data/saves/     Persistent encrusted save files
+data/saves/     Per-player save directories (<pubkey_prefix>/)
 deploy/udev/    udev rules template for stable serial symlink
 ```
 
@@ -544,4 +512,3 @@ deploy/udev/    udev rules template for stable serial symlink
 Zorkbot is released under the [MIT License](LICENSE).
 
 The Python mesh bot borrows patterns from [ottobot](https://github.com/tahnok/ottobot) (MIT). See [NOTICES.md](NOTICES.md) for attribution details and other third-party components.
-
