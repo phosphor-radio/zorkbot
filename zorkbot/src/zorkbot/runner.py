@@ -20,8 +20,10 @@ from zorkbot.context import IncomingMessage
 
 logger = logging.getLogger(__name__)
 
-SEND_SPACING_SECONDS = 2.0
-STARTUP_MESSAGE = "Zork I is live on #zork — try !zork look"
+STARTUP_MESSAGE = (
+    "Zork I is live — DM me !start to begin your private session. "
+    "Use !list, !watch, !help on this channel."
+)
 
 
 async def connect(
@@ -68,17 +70,33 @@ class MeshCoreRunner:
     def __init__(self, bot: ZorkBot, meshcore: MeshCore) -> None:
         self.bot = bot
         self.meshcore = meshcore
-        self._subscription: Any | None = None
+        self._channel_sub: Any | None = None
+        self._dm_sub: Any | None = None
+        # Unified send lock: all RF transmissions (channel + DM) serialized here.
         self._send_lock = asyncio.Lock()
         self._last_send_at: float | None = None
+        # Running total of packets pending in the lock queue.
+        self._send_queue_depth: int = 0
+
+        # Use the advertiser owned by the bot so cooldown state is shared.
+        self.advertiser = bot.advertiser
 
     async def start(self) -> None:
         await self.meshcore.ensure_contacts()
-        self._subscription = self.meshcore.subscribe(
+
+        self._channel_sub = self.meshcore.subscribe(
             EventType.CHANNEL_MSG_RECV,
             self._on_channel_msg,
             attribute_filters={"channel_idx": self.bot.config.channel.index},
         )
+        self._dm_sub = self.meshcore.subscribe(
+            EventType.CONTACT_MSG_RECV,
+            self._on_dm_msg,
+        )
+
+        # Give the bot a reference to send DMs.
+        self.bot.set_send_dm(self._send_dm_packets)
+
         await self.meshcore.start_auto_message_fetching()
         logger.info(
             "listening on channel %d (%s) as %r",
@@ -86,6 +104,9 @@ class MeshCoreRunner:
             self.bot.config.channel.name,
             self.bot.name,
         )
+
+        self.advertiser.start(self.meshcore)
+
         if self.bot.config.announce_on_start:
             await self._send_chan_msg(
                 self.bot.config.channel.index,
@@ -93,10 +114,15 @@ class MeshCoreRunner:
             )
 
     async def stop(self) -> None:
-        if self._subscription is not None:
-            self.meshcore.unsubscribe(self._subscription)
-            self._subscription = None
+        if self._channel_sub is not None:
+            self.meshcore.unsubscribe(self._channel_sub)
+            self._channel_sub = None
+        if self._dm_sub is not None:
+            self.meshcore.unsubscribe(self._dm_sub)
+            self._dm_sub = None
         await self.meshcore.stop_auto_message_fetching()
+        await self.advertiser.stop()
+        await self.bot.stop()
 
     async def run_forever(self) -> None:
         await self.start()
@@ -106,10 +132,16 @@ class MeshCoreRunner:
         finally:
             await self.stop()
 
+    # ------------------------------------------------------------------
+    # Incoming message handlers
+    # ------------------------------------------------------------------
+
     async def _on_channel_msg(self, event: Event) -> None:
         payload = event.payload
         channel_idx = payload.get("channel_idx", 0)
         raw_text = payload.get("text", "")
+        pubkey_prefix = payload.get("pubkey_prefix")
+
         sender_name, sep, body = raw_text.partition(":")
         if sep:
             sender_name = sender_name.strip()
@@ -118,35 +150,103 @@ class MeshCoreRunner:
             sender_name = None
             text = raw_text
 
+        # Resolve display name from contact table if not in message text.
+        if not sender_name and pubkey_prefix:
+            contact = self.meshcore.get_contact_by_key_prefix(pubkey_prefix)
+            if contact:
+                sender_name = contact.get("adv_name", pubkey_prefix[:8])
+
         message = IncomingMessage(
             text=text,
             sender_name=sender_name,
+            pubkey_prefix=pubkey_prefix,
+            is_dm=False,
             channel_idx=channel_idx,
             raw=payload,
         )
         logger.info(
-            "channel %d msg from %s: %r",
+            "channel %d msg player=%s: %r",
             channel_idx,
-            sender_name,
+            (pubkey_prefix or "?")[:8],
             text,
         )
 
         async def reply(text: str) -> None:
-            logger.info("channel %d reply: %r", channel_idx, text)
-            result = await self._send_chan_msg(channel_idx, text)
-            if result.type == EventType.ERROR:
-                logger.error("failed to send reply: %r", result.payload)
+            await self._send_chan_msg(channel_idx, text)
 
-        await self.bot.dispatch(message, reply)
+        await self.bot.dispatch_channel(message, reply)
+
+    async def _on_dm_msg(self, event: Event) -> None:
+        payload = event.payload
+        pubkey_prefix = payload.get("pubkey_prefix")
+        text = payload.get("text", "").strip()
+
+        # Resolve display name from contact table.
+        sender_name: str | None = None
+        if pubkey_prefix:
+            contact = self.meshcore.get_contact_by_key_prefix(pubkey_prefix)
+            if contact:
+                sender_name = contact.get("adv_name", pubkey_prefix[:8])
+            else:
+                sender_name = pubkey_prefix[:8]
+
+        message = IncomingMessage(
+            text=text,
+            sender_name=sender_name,
+            pubkey_prefix=pubkey_prefix,
+            is_dm=True,
+            channel_idx=0,
+            raw=payload,
+        )
+        logger.info(
+            "DM from player=%s: %r",
+            (pubkey_prefix or "?")[:8],
+            text,
+        )
+
+        async def reply(reply_text: str) -> None:
+            if pubkey_prefix:
+                await self._send_dm(pubkey_prefix, reply_text)
+
+        await self.bot.dispatch_dm(message, reply)
+
+    # ------------------------------------------------------------------
+    # Send helpers — all go through the unified lock
+    # ------------------------------------------------------------------
+
+    async def _send_dm_packets(self, pubkey_prefix: str, text: str) -> None:
+        """Called by bot.py to send a DM. Goes through the unified send gate."""
+        await self._send_dm(pubkey_prefix, text)
+
+    async def _send_dm(self, pubkey_prefix: str, text: str) -> None:
+        await self._send_with_spacing(
+            self.meshcore.commands.send_msg(pubkey_prefix, text)
+        )
 
     async def _send_chan_msg(self, channel_idx: int, text: str) -> Event:
-        async with self._send_lock:
-            if self._last_send_at is not None:
-                elapsed = asyncio.get_running_loop().time() - self._last_send_at
-                remaining = SEND_SPACING_SECONDS - elapsed
-                if remaining > 0:
-                    await asyncio.sleep(remaining)
-            try:
-                return await self.meshcore.commands.send_chan_msg(channel_idx, text)
-            finally:
-                self._last_send_at = asyncio.get_running_loop().time()
+        return await self._send_with_spacing(
+            self.meshcore.commands.send_chan_msg(channel_idx, text)
+        )
+
+    async def _send_with_spacing(self, coro) -> Any:
+        max_depth = self.bot.config.max_send_queue_depth
+        if self._send_queue_depth >= max_depth:
+            logger.warning(
+                "send queue overflow (depth=%d) — dropping packet", self._send_queue_depth
+            )
+            return None
+
+        self._send_queue_depth += 1
+        try:
+            async with self._send_lock:
+                if self._last_send_at is not None:
+                    elapsed = asyncio.get_running_loop().time() - self._last_send_at
+                    remaining = self.bot.config.send_spacing_seconds - elapsed
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                try:
+                    return await coro
+                finally:
+                    self._last_send_at = asyncio.get_running_loop().time()
+        finally:
+            self._send_queue_depth -= 1

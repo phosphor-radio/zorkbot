@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 
+from zorkbot.advertiser import Advertiser
 from zorkbot.bot import ZorkBot
 from zorkbot.config import load_config
 from zorkbot.game_client import GameClient
@@ -16,7 +17,7 @@ from zorkbot.simulator import Simulator
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="zorkbot",
-        description="MeshCore bot for shared Zork I on #zork",
+        description="MeshCore bot for per-player Zork I sessions via DM",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--serial", metavar="PORT", help="serial port, e.g. /dev/ttyUSB0")
@@ -49,7 +50,14 @@ async def run(args: argparse.Namespace) -> None:
         admin_token=config.admin_token,
     ) as game:
         if args.simulate:
-            bot = ZorkBot(config, game)
+            # In simulate mode we don't have a real meshcore object,
+            # so pass a stub that satisfies the advertiser and contact lookup.
+            meshcore = _StubMeshCore()
+            advertiser = Advertiser(
+                interval_seconds=config.advert_interval_seconds,
+                cooldown_seconds=config.advert_cooldown_seconds,
+            )
+            bot = ZorkBot(config, game, advertiser, meshcore)
             try:
                 await Simulator(bot).repl()
             finally:
@@ -72,14 +80,32 @@ async def run(args: argparse.Namespace) -> None:
                     raise SystemExit(
                         "could not determine bot name; set name in config or --name"
                     )
-            bot = ZorkBot(config, game)
+            advertiser = Advertiser(
+                interval_seconds=config.advert_interval_seconds,
+                cooldown_seconds=config.advert_cooldown_seconds,
+            )
+            bot = ZorkBot(config, game, advertiser, meshcore)
             runner = MeshCoreRunner(bot, meshcore)
             try:
                 await runner.run_forever()
             finally:
-                await bot.stop()
+                await runner.bot.stop()
         finally:
             await meshcore.disconnect()
+
+
+class _StubMeshCore:
+    """Minimal stub for simulate mode (no real radio)."""
+
+    def get_contact_by_key_prefix(self, pubkey_prefix: str) -> dict | None:
+        return {"adv_name": "simuser"}
+
+    class commands:
+        @staticmethod
+        async def send_advert(*, flood: bool = False) -> object:
+            class _R:
+                type = "ok"
+            return _R()
 
 
 def main() -> None:

@@ -143,6 +143,16 @@ func (m *Manager) Reset(ctx context.Context) error {
 	return m.startLocked(ctx)
 }
 
+// Close terminates the session without restarting.
+func (m *Manager) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.session != nil {
+		m.session.Close()
+		m.session = nil
+	}
+}
+
 func (m *Manager) restartAfterFailure() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

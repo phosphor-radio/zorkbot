@@ -12,7 +12,7 @@ from zorkbot.channels import ChannelConfig, ZORK_CHANNEL_NAME
 
 logger = logging.getLogger(__name__)
 
-_ADMIN_KEYS = frozenset({"names"})
+_ADMIN_KEYS = frozenset({"pubkeys"})
 _CHANNEL_KEYS = frozenset({"index", "name", "secret"})
 _ROOT_OPTIONAL_KEYS = frozenset({
     "log_level",
@@ -20,12 +20,21 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "announce_on_start",
     "command_queue_size",
     "rate_limit_seconds",
+    "max_active_sessions",
+    "max_watchers_per_session",
+    "session_inactivity_seconds",
+    "session_idle_start_seconds",
+    "advert_interval_seconds",
+    "advert_cooldown_seconds",
+    "send_spacing_seconds",
+    "max_send_queue_depth",
 })
 
 
 @dataclass
 class AdminConfig:
-    names: list[str] = field(default_factory=list)
+    # List of 12-character lowercase hex pubkey prefixes for admin users.
+    pubkeys: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -39,11 +48,27 @@ class BotConfig:
     packet_max_chars: int = 100
     announce_on_start: bool = False
     command_queue_size: int = 8
+
+    # Rate limiting
     rate_limit_seconds: float = 3.0
 
+    # Session management
+    max_active_sessions: int = 8
+    max_watchers_per_session: int = 2
+    session_inactivity_seconds: int = 1800
+    session_idle_start_seconds: int = 300
+
+    # Advertising
+    advert_interval_seconds: int = 300
+    advert_cooldown_seconds: int = 300
+
+    # RF send serialization
+    send_spacing_seconds: float = 2.0
+    max_send_queue_depth: int = 64
+
     @property
-    def admin_names(self) -> frozenset[str]:
-        return frozenset(name.lower() for name in self.admin.names)
+    def admin_pubkeys(self) -> frozenset[str]:
+        return frozenset(pk.lower() for pk in self.admin.pubkeys)
 
 
 def load_config(path: str | Path | None) -> BotConfig:
@@ -84,6 +109,22 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.command_queue_size = int(command_queue_size)
     if rate_limit_seconds := _root_value(data, channel, admin, "rate_limit_seconds"):
         config.rate_limit_seconds = float(rate_limit_seconds)
+    if max_active_sessions := _root_value(data, channel, admin, "max_active_sessions"):
+        config.max_active_sessions = int(max_active_sessions)
+    if max_watchers_per_session := _root_value(data, channel, admin, "max_watchers_per_session"):
+        config.max_watchers_per_session = int(max_watchers_per_session)
+    if session_inactivity_seconds := _root_value(data, channel, admin, "session_inactivity_seconds"):
+        config.session_inactivity_seconds = int(session_inactivity_seconds)
+    if session_idle_start_seconds := _root_value(data, channel, admin, "session_idle_start_seconds"):
+        config.session_idle_start_seconds = int(session_idle_start_seconds)
+    if advert_interval_seconds := _root_value(data, channel, admin, "advert_interval_seconds"):
+        config.advert_interval_seconds = int(advert_interval_seconds)
+    if advert_cooldown_seconds := _root_value(data, channel, admin, "advert_cooldown_seconds"):
+        config.advert_cooldown_seconds = int(advert_cooldown_seconds)
+    if send_spacing_seconds := _root_value(data, channel, admin, "send_spacing_seconds"):
+        config.send_spacing_seconds = float(send_spacing_seconds)
+    if max_send_queue_depth := _root_value(data, channel, admin, "max_send_queue_depth"):
+        config.max_send_queue_depth = int(max_send_queue_depth)
 
     if channel:
         config.channel = ChannelConfig(
@@ -91,8 +132,8 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
             name=str(channel.get("name", ZORK_CHANNEL_NAME)),
         )
 
-    if names := admin.get("names"):
-        config.admin = AdminConfig(names=[str(name) for name in names])
+    if pubkeys := admin.get("pubkeys"):
+        config.admin = AdminConfig(pubkeys=[str(pk) for pk in pubkeys])
 
 
 def _warn_misplaced_section_keys(section: str, values: dict, allowed: frozenset[str]) -> None:

@@ -16,13 +16,23 @@ class CommandResult:
 
 
 @dataclass(frozen=True)
-class GameStatus:
-    uptime: str
-    busy: bool
+class SessionInfo:
+    num: int
+    player_id: str
+    started_at: str
+    last_command_at: str = ""
 
 
 class GameServiceError(Exception):
     """Raised when the game service returns an unexpected error."""
+
+
+class SessionFullError(GameServiceError):
+    """Raised when the session pool is at capacity."""
+
+
+class SessionNotFoundError(GameServiceError):
+    """Raised when no active session exists for a player."""
 
 
 class GameClient:
@@ -31,7 +41,7 @@ class GameClient:
         base_url: str,
         *,
         admin_token: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.admin_token = admin_token
@@ -53,11 +63,61 @@ class GameClient:
             await self._client.aclose()
             self._client = None
 
-    async def command(self, text: str, *, admin: bool = False) -> CommandResult:
+    async def start_session(self, player_id: str) -> None:
+        """Start or restore a session for player_id."""
         response = await self._request(
             "POST",
-            "/command",
-            json={"text": text, "admin": admin},
+            "/sessions",
+            json={"player_id": player_id},
+        )
+        payload = response.json()
+        if not payload.get("ok", False):
+            error = payload.get("error", "start failed")
+            if response.status_code == 503:
+                raise SessionFullError(error)
+            raise GameServiceError(error)
+
+    async def end_session(self, player_id: str) -> None:
+        """Save and end the session for player_id."""
+        response = await self._request("DELETE", f"/sessions/{player_id}")
+        payload = response.json()
+        if not payload.get("ok", False):
+            raise GameServiceError(payload.get("error", "end failed"))
+
+    async def reset_session(self, player_id: str) -> None:
+        """Wipe save and restart a fresh session for player_id."""
+        headers = {}
+        if self.admin_token:
+            headers["X-Admin-Token"] = self.admin_token
+        response = await self._request(
+            "DELETE",
+            f"/sessions/{player_id}/save",
+            headers=headers,
+        )
+        payload = response.json()
+        if not payload.get("ok", False):
+            raise GameServiceError(payload.get("error", "reset failed"))
+
+    async def list_sessions(self) -> list[SessionInfo]:
+        """Return all active sessions."""
+        response = await self._request("GET", "/sessions")
+        payload = response.json()
+        return [
+            SessionInfo(
+                num=s["num"],
+                player_id=s["player_id"],
+                started_at=s["started_at"],
+                last_command_at=s.get("last_command_at", ""),
+            )
+            for s in payload.get("sessions", [])
+        ]
+
+    async def command(self, player_id: str, text: str) -> CommandResult:
+        """Send a game command for player_id."""
+        response = await self._request(
+            "POST",
+            f"/sessions/{player_id}/command",
+            json={"text": text},
         )
         payload = response.json()
         return CommandResult(
@@ -69,26 +129,6 @@ class GameClient:
     async def health(self) -> bool:
         response = await self._request("GET", "/health")
         return response.status_code == 200
-
-    async def status(self) -> GameStatus:
-        response = await self._request("GET", "/status")
-        payload = response.json()
-        return GameStatus(
-            uptime=payload.get("uptime", "0s"),
-            busy=bool(payload.get("busy", False)),
-        )
-
-    async def reset(self) -> None:
-        if not self.admin_token:
-            raise GameServiceError("admin token not configured")
-        response = await self._request(
-            "POST",
-            "/reset",
-            headers={"X-Admin-Token": self.admin_token},
-        )
-        payload: dict[str, Any] = response.json()
-        if not payload.get("ok", False):
-            raise GameServiceError(payload.get("error", "reset failed"))
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         client = self._client or httpx.AsyncClient(
@@ -105,6 +145,10 @@ class GameClient:
                 message = payload.get("error", str(exc))
             else:
                 message = str(exc)
+            if exc.response.status_code == 503:
+                raise SessionFullError(message) from exc
+            if exc.response.status_code == 404:
+                raise SessionNotFoundError(message) from exc
             raise GameServiceError(message) from exc
         finally:
             if self._client is None:
