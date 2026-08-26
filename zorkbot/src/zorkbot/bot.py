@@ -14,7 +14,7 @@ from zorkbot.commands.reset import handle_reset
 from zorkbot.commands.start import AUTHOR_TEXT, HELP_TEXT, handle_start
 from zorkbot.commands.watch import handle_watch
 from zorkbot.commands.watchers import handle_watchers
-from zorkbot.commands.zork import handle_game_command
+from zorkbot.commands.zork import _HELP_PACKETS, handle_game_command
 from zorkbot.config import BotConfig
 from zorkbot.context import Context, IncomingMessage, ReplyFunc
 from zorkbot.game_client import GameClient
@@ -186,8 +186,7 @@ class ZorkBot:
             await self.advertiser.send_if_due(self.meshcore)
 
         if command in ("help", "commands"):
-            lines = [line for line in HELP_TEXT.split("\n") if line.strip()]
-            await ctx.reply_many(lines)
+            await ctx.reply_many(_HELP_PACKETS)
             return
 
         if command == "author":

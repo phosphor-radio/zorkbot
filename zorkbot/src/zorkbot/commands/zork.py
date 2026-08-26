@@ -12,16 +12,12 @@ from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
-# One line per command — sent as individual messages so newlines are preserved.
-HELP_TEXT = "\n".join([
-    "!start — begin or resume game",
-    "!end — save & quit",
-    "!list — active sessions",
-    "!watch <N> — observe a session",
-    "!watchers — list all observers",
-    "!reset (DM only) — wipe save & restart",
-    "DM me: just type your game commands",
-])
+# Two manually-grouped packets, each under 120 chars with newlines preserved.
+_HELP_PACKETS = [
+    "!start — begin or resume game\n!end — save & quit\n!list — active sessions\n!watch <N> — observe a session",
+    "!watchers — list all observers\n!reset (DM only) — wipe save & restart\nDM me: just type your game commands",
+]
+HELP_TEXT = "\n".join(_HELP_PACKETS)
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
 Discord: @phosphor_radio
