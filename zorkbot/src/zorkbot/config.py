@@ -45,7 +45,7 @@ class BotConfig:
     admin_token: str | None = None
     admin: AdminConfig = field(default_factory=AdminConfig)
     log_level: str | None = None
-    packet_max_chars: int = 100
+    packet_max_chars: int = 120
     announce_on_start: bool = False
     command_queue_size: int = 8
 

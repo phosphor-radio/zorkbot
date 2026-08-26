@@ -12,10 +12,11 @@ from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
-# Fits in one 100-char mesh packet.
+# Fits in two 120-char mesh packets (also two at 100-char limit).
 HELP_TEXT = (
-    "!start/!end — begin/end game  !list  !watch <N>  !watchers  !reset (DM)\n"
-    "DM: type game commands"
+    "!start — begin or resume  !end — save & quit  !list — active sessions\n"
+    "!watch <N> — observe  !watchers — list observers  !reset (DM) — wipe & restart\n"
+    "DM me: just type your game commands"
 )
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
