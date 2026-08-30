@@ -23,7 +23,9 @@ firmware's contact table when an advertisement from that node has been received.
 - **Bot → player DM**: the bot's radio must have the player in its contact table (received their
   advert).
 - **Player → bot DM**: the player's radio must have the bot in its contact table (received the
-  bot's advert). The bot's periodic `send_advert(flood=True)` and on-`!start` advert handle this.
+  bot's advert). The bot's periodic `send_advert` and on-`!start` advert handle this. Whether
+  the advert is sent as flood or zerohop is controlled by `advert_flood` (default `true`). Adverts
+  are disabled by default (`advert_enabled = false`) and must be explicitly enabled on a live server.
 
 **Key asymmetry**: when the bot receives a `CONTACT_MSG_RECV` event, the player is already in the
 bot's contact table (the firmware decrypted it), so the bot can always DM back. A player issuing
@@ -179,7 +181,7 @@ On reset all files in the directory are deleted.
   number; tracks watcher sets; enforces one-state-per-player rule; enforces
   `max_watchers_per_session`
 - `src/zorkbot/advertiser.py` — cooldown-gated `send_if_due(meshcore)`; called on `!start` and by
-  background timer
+  background timer; no-op when `advert_enabled = false`; flood mode controlled by `advert_flood`
 
 ### Modified files
 
@@ -189,7 +191,8 @@ On reset all files in the directory are deleted.
   configurable `send_spacing_seconds`; `max_send_queue_depth` overflow protection
 - `bot.py` — per-player asyncio queues; channel lobby routing; DM game routing; watcher fan-out
 - `rate_limit.py` — key changed from `sender_name` to `pubkey_prefix`
-- `config.py` — new session, advert, and send parameters; `AdminConfig.pubkeys` replaces
+- `config.py` — new session, advert, and send parameters; `advert_enabled` and `advert_flood`
+  added; `AdminConfig.pubkeys` replaces
   `AdminConfig.names`
 - `commands/` — new handlers: `start`, `end`, `list_sessions`, `watch`, `watchers`, `reset`;
   `zork.py` refactored for per-player path
@@ -230,6 +233,8 @@ dropped with a warning log.
 | `session_inactivity_seconds` | 1800 | Idle timeout after first command |
 | `session_idle_start_seconds` | 300 | Idle timeout before first command (anti-squat) |
 | `max_watchers_per_session` | 2 | Max observers per session |
+| `advert_enabled` | false | Enable advert sending; must be true on a live server |
+| `advert_flood` | true | true = flood (whole mesh); false = zerohop (direct only) |
 | `advert_interval_seconds` | 300 | Background advert timer interval |
 | `advert_cooldown_seconds` | 300 | Min time between any two adverts |
 | `send_spacing_seconds` | 2.0 | Minimum gap between RF transmissions |

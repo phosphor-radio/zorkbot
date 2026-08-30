@@ -1,6 +1,6 @@
 """Cooldown-gated MeshCore advert sender.
 
-Ensures the bot sends a flood advert on every !start and on a background
+Ensures the bot sends an advert on every !start and on a background
 timer, but never more than once per advert_cooldown_seconds.
 """
 
@@ -19,16 +19,22 @@ class Advertiser:
     When *enabled* is False all methods are no-ops; no adverts are sent and
     no background task is started.  Set advert_enabled = true in zorkbot.toml
     for a live server.
+
+    *flood* controls the send_advert flood parameter:
+      True  — flood advert reaches the whole mesh (default; needed for DMs).
+      False — zerohop advert reaches only directly connected nodes.
     """
 
     def __init__(
         self,
         *,
         enabled: bool = False,
+        flood: bool = True,
         interval_seconds: int = 300,
         cooldown_seconds: int = 300,
     ) -> None:
         self._enabled = enabled
+        self._flood = flood
         self._interval = interval_seconds
         self._cooldown = cooldown_seconds
         self._last_sent_at: float = 0.0
@@ -69,9 +75,9 @@ class Advertiser:
 
     async def _send(self, meshcore: object) -> None:
         try:
-            result = await meshcore.commands.send_advert(flood=True)
+            result = await meshcore.commands.send_advert(flood=self._flood)
             self._last_sent_at = time.monotonic()
-            logger.info("advert sent (flood=True): %s", result.type)
+            logger.info("advert sent (flood=%s): %s", self._flood, result.type)
         except Exception:
             logger.exception("failed to send advert")
 

@@ -20,6 +20,8 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 # Advertising (send_advert flood=True so players can DM the bot)
 # advert_enabled = false    # MUST be set to true on a live server so players
 #                           # can discover the bot and exchange DM keys.
+# advert_flood = true       # true = flood (whole mesh, needed for DMs);
+#                           # false = zerohop (directly connected nodes only)
 # advert_interval_seconds = 300     # background advert timer
 # advert_cooldown_seconds = 300     # min gap between adverts
 

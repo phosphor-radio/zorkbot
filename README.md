@@ -342,6 +342,10 @@ session_inactivity_seconds = 1800   # auto-save after 30 min idle
 session_idle_start_seconds = 300    # release slot if no command in 5 min
 
 # Advertising
+# MUST be set to true on a live server so players can discover the bot
+# and exchange DM keys. Default false for safety.
+advert_enabled = true
+advert_flood = true             # true = whole mesh; false = zerohop only
 advert_interval_seconds = 300   # background advert timer
 advert_cooldown_seconds = 300   # min gap between adverts
 
