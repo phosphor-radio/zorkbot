@@ -12,12 +12,19 @@ from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
-# Two manually-grouped packets, each under 120 chars with newlines preserved.
+# Manually-grouped packets, each under 120 chars with newlines preserved.
 _HELP_PACKETS = [
     "!start — begin or resume game\n!end — save & quit\n!list — active sessions\n!watch <N> — observe a session",
     "!watchers — list all observers\n!reset (DM only) — wipe save & restart\nDM me: just type your game commands",
+    "!author — bot info & source",
 ]
 HELP_TEXT = "\n".join(_HELP_PACKETS)
+
+# Shown instead of _HELP_PACKETS for !help from a DM with an active
+# (non-watching) session, so a playing player also sees !rules.
+_HELP_PACKETS_IN_SESSION = _HELP_PACKETS + [
+    "!rules — basic rules for this game",
+]
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
 Discord: @phosphor_radio

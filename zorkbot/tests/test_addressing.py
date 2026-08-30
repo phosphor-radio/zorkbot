@@ -14,6 +14,9 @@ from zorkbot.addressing import parse_command, parse_zork_command, strip_address
         ("!help", "help"),
         ("!commands", "help"),
         ("!author", "author"),
+        ("!source", "author"),
+        ("!rules", "rules"),
+        ("!bots", "bots"),
         ("!zorkathon", None),
     ],
 )

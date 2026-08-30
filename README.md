@@ -275,8 +275,9 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 
 | Command | Who | Action |
 | ------- | --- | ------ |
-| `!help` / `!commands` | Everyone | Command reference |
-| `!author` | Everyone | Author / project links |
+| `!help` / `!commands` | Everyone | Command reference (adds `!rules` when sent via DM with an active session) |
+| `!author` (alias `!source`) | Everyone | Author / project links |
+| `!bots` | Everyone | Roll call — replies after a 5s delay, so multiple mesh bots don't collide |
 | `!start` | Everyone | Begin or resume your session |
 | `!end` | Everyone | Save and end your session (or stop watching) |
 | `!list` | Everyone | List active sessions |
@@ -292,6 +293,7 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 | `!start` | Begin or resume your session |
 | `!end` | Save and end your session |
 | `!reset` | Wipe save file and start fresh immediately |
+| `!rules` | Basic rules and example commands for the game (requires an active, non-watching session) |
 
 ### Session lifecycle
 

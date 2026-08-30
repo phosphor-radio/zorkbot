@@ -10,7 +10,9 @@ import respx
 import httpx
 
 from zorkbot.advertiser import Advertiser
-from zorkbot.bot import ZorkBot
+from zorkbot.bot import HELP_TEXT, ZorkBot
+from zorkbot.commands.bots import REPLY_DELAY_SECONDS, REPLY_TEXT
+from zorkbot.commands.rules import RULES_TEXT
 from zorkbot.config import AdminConfig, BotConfig
 from zorkbot.context import IncomingMessage
 from zorkbot.game_client import GameClient
@@ -107,6 +109,189 @@ async def test_author_command() -> None:
         await bot.drain()
 
     assert any("phosphor_radio" in r for r in replies)
+
+
+@pytest.mark.asyncio
+async def test_source_aliases_to_author() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!source"), reply)
+        await bot.drain()
+
+    assert any("phosphor_radio" in r for r in replies)
+
+
+def test_help_text_mentions_author_not_source() -> None:
+    assert "!author" in HELP_TEXT
+    assert "!source" not in HELP_TEXT
+
+
+@pytest.mark.asyncio
+async def test_bots_command_replies_after_delay() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    with patch("zorkbot.commands.bots.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        async with GameClient("http://game:8080") as game:
+            bot = _make_bot(config=config, game=game)
+            await bot.dispatch_dm(_dm_message("!bots"), reply)
+            await bot.drain()
+            # !bots replies via a fire-and-forget background task, not the
+            # player's own command queue — drain() doesn't wait for it.
+            await asyncio.gather(*bot._background_tasks)
+
+    mock_sleep.assert_awaited_once_with(REPLY_DELAY_SECONDS)
+    assert replies == [REPLY_TEXT]
+
+
+@pytest.mark.asyncio
+async def test_bots_command_on_channel() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    with patch("zorkbot.commands.bots.asyncio.sleep", new=AsyncMock()):
+        async with GameClient("http://game:8080") as game:
+            bot = _make_bot(config=config, game=game)
+            await bot.dispatch_channel(
+                _channel_message("!bots", channel_idx=config.channel.index),
+                reply,
+            )
+            await bot.drain()
+            await asyncio.gather(*bot._background_tasks)
+
+    assert replies == [REPLY_TEXT]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_help_via_dm_in_active_session_includes_rules() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        replies.clear()
+
+        await bot.dispatch_dm(_dm_message("!help"), reply)
+        await bot.drain()
+
+    assert any("!rules" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_help_via_dm_without_session_omits_rules() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!help"), reply)
+        await bot.drain()
+
+    assert not any("!rules" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_help_on_channel_omits_rules_even_with_session() -> None:
+    """!rules is DM-only content — channel !help never shows it, regardless
+    of session state, since the channel isn't where sessions are played."""
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_channel(
+            _channel_message("!help", channel_idx=config.channel.index),
+            reply,
+        )
+        await bot.drain()
+
+    assert not any("!rules" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rules_command_returns_zork_rules() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        replies.clear()
+
+        await bot.dispatch_dm(_dm_message("!rules"), reply)
+        await bot.drain()
+
+    assert replies == [RULES_TEXT]
+
+
+@pytest.mark.asyncio
+async def test_rules_without_session_prompts_start() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!rules"), reply)
+        await bot.drain()
+
+    assert any("!start" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_rules_command_not_available_on_channel() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_channel(
+            _channel_message("!rules", channel_idx=config.channel.index),
+            reply,
+        )
+        await bot.drain()
+
+    assert replies == ["Send !start and then DM me to play."]
 
 
 @pytest.mark.asyncio

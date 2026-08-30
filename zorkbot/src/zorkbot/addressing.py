@@ -10,6 +10,7 @@ from __future__ import annotations
 BOT_COMMANDS = frozenset({
     "help", "commands", "author",
     "start", "end", "list", "watch", "watchers", "reset",
+    "rules", "bots",
 })
 
 # Legacy !zork prefix — still supported for compatibility.
@@ -56,6 +57,8 @@ def parse_command(text: str) -> str | None:
             # Normalize aliases.
             if cmd == "commands":
                 cmd = "help"
+            if cmd == "source":
+                cmd = "author"
             if cmd in BOT_COMMANDS:
                 rest = parts[1] if len(parts) > 1 else ""
                 return f"{cmd} {rest}".strip() if rest else cmd
