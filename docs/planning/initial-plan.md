@@ -1,8 +1,15 @@
 # Zorkbot — Initial Planning Document
 
-**Status:** Draft  
+**Status:** Superseded  
+**Superseded by:** [`docs/specs/dm-sessions.md`](../specs/dm-sessions.md)  
 **Created:** 2026-07-27  
 **Repo:** `zorkbot` (standalone project)
+
+> **Note:** This document describes the original v1 shared-session architecture (one Zork
+> world for all players, `!zork` channel commands, single `Manager` PTY). The project has
+> since moved to per-player DM sessions. See `docs/specs/dm-sessions.md` for the current
+> design. The phase checklist at the bottom of this document reflects v1 completion; the
+> current architecture is documented in the spec and README.
 
 ## Summary
 

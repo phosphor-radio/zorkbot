@@ -1,7 +1,13 @@
 # Phase 3 — Standalone Mesh Bot
 
-**Status:** Implemented  
+**Status:** Implemented (command interface superseded — see note below)  
 **Planning reference:** `docs/planning/initial-plan.md` (Phase 3)
+
+> **Note:** The channel command interface described here (`!zork`, shared game world, admin
+> token in message) was replaced by the DM-based per-player sessions design in
+> [`dm-sessions.md`](dm-sessions.md). The bot infrastructure (serial/TCP/BLE connection,
+> channel subscription, simulator) was carried forward. Refer to the README and
+> `dm-sessions.md` for the current command set.
 
 ## Scope
 

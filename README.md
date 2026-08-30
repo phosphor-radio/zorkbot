@@ -113,7 +113,7 @@ Edit `.env`:
 
 Edit `zorkbot/zorkbot.toml`:
 
-- Set `[admin].pubkeys` to your `pubkey_prefix` (12 hex chars — send `!list` to find yours).
+- Set `[admin].pubkeys` to your `pubkey_prefix` (12 hex chars — see [Admin access](#admin-access) for how to find it).
 - Confirm `[channel]` index/name match your `#zork` channel.
 
 `game_url` in TOML should stay `http://game:8080` for Compose. See [Configuration](#configuration) for all settings.
@@ -363,7 +363,7 @@ pubkeys = ["aabbccddeeff"]      # 12-char hex pubkey_prefix of admin users
 
 Admin commands are authenticated by **`pubkey_prefix`** — a cryptographic identifier derived from the node's private key that cannot be spoofed. Set `[admin].pubkeys` in `zorkbot.toml` to your 12-char hex pubkey prefix.
 
-To find your prefix: send any command to the bot and check `docker compose logs zorkbot` for `player=<prefix8>`, or look in the MeshCore app for your node's key.
+To find your prefix: look up your node's public key in the MeshCore app (Contacts → your node → key details). The `pubkey_prefix` is the first 12 hex characters of that key. Alternatively, check `docker compose logs zorkbot` — log lines include `player=<id>` where the first 8 characters are your prefix (you will need the full 12 to paste into TOML; cross-reference with the MeshCore app).
 
 Admin commands:
 - `!end <N>` — force-end any session by number (DM only)

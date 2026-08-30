@@ -1,8 +1,26 @@
 # Admin via DM (pubkey allowlist)
 
-**Status:** Spec  
-**Planning reference:** `docs/planning/initial-plan.md` (Admin Authorization)  
-**Replaces:** mesh-facing admin auth in `docs/specs/phase-3-mesh-bot.md` and rate-limit exemption via `admin.names` in `docs/specs/phase-5-polish.md`
+**Status:** Superseded  
+**Superseded by:** [`dm-sessions.md`](dm-sessions.md) (admin auth section)
+
+> **Implementation note:** This spec was written before the DM sessions redesign. Two key
+> decisions changed during implementation:
+>
+> 1. **Key length**: the implementation uses **12-char `pubkey_prefix`** (not full 64-char
+>    Ed25519 keys) for admin allowlisting. This is consistent with how `pubkey_prefix` is
+>    used for session keying throughout the codebase. See `config.py` `AdminConfig.pubkeys`
+>    and `context.py` `is_admin()`.
+> 2. **Admin commands**: the old `!zork save|restore|reset|quit` admin commands no longer
+>    exist. The only remaining admin command is `!end <N>` (force-end a session by number,
+>    DM only). Direct game-service reset is still possible via the HTTP API with
+>    `ADMIN_TOKEN`.
+>
+> The threat model, authorization algorithm (DM-only, pubkey gating), and config shape
+> (`[admin] pubkeys`) described below are otherwise correct and were implemented as
+> specified. Refer to `dm-sessions.md` for the authoritative current design.
+
+---
+
 
 ## Problem
 
