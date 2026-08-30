@@ -69,6 +69,8 @@ The `game` service runs up to `MAX_ACTIVE_SESSIONS` (default 8) PTY processes si
 
 `CONTACT_MSG_RECV` (DM) events carry `pubkey_prefix` directly — a cryptographic identifier derived from the node's private key, used as the session key throughout and unspoofable. `CHANNEL_MSG_RECV` events carry no sender key material at all (group-channel packets have no per-sender identity field on the wire); the bot instead parses the `"Name: text"` convention companion apps use and resolves `pubkey_prefix` via a contact-table lookup by name. This only works for senders already in the bot's contact table — see the advert requirement below.
 
+The contact-table lookup reads the `meshcore` library's *local* cache, not the radio's live state — the two can diverge. The library only takes a full snapshot once by default (on connect); an advert received afterward is enough for the radio itself to add the contact (so DMs work immediately, since that decryption happens on-device), but the library's cache only gets marked stale, not re-fetched, unless `auto_update_contacts` is enabled. zorkbot turns this on at startup (`MeshCoreRunner.start` in [`runner.py`](zorkbot/src/zorkbot/runner.py)) so a new advert triggers an immediate incremental re-sync — without it, a channel `!start` from a newly-advertised player fails to identify them until the process restarts and takes a fresh snapshot.
+
 ### Advert requirement for DMs
 
 MeshCore DMs require the recipient's public key to be in the firmware's contact table, which is populated when an advertisement is received. The bot sends a periodic `send_advert(flood=True)` so players can add it to their contacts. On every `!start`, the bot also sends an advert if the cooldown has elapsed.

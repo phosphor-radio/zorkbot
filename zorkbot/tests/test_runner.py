@@ -18,12 +18,15 @@ def _make_meshcore(contact=None):
     mc = MagicMock()
     mc.get_contact_by_name = MagicMock(return_value=contact)
     mc.get_contact_by_key_prefix = MagicMock(return_value=None)
+    mc.ensure_contacts = AsyncMock()
+    mc.start_auto_message_fetching = AsyncMock()
     return mc
 
 
 def _make_runner(meshcore):
     bot = MagicMock()
     bot.config.channel.index = 1
+    bot.config.announce_on_start = False
     bot.dispatch_channel = AsyncMock()
     bot.advertiser = MagicMock()
     return MeshCoreRunner(bot, meshcore)
@@ -114,3 +117,21 @@ async def test_apply_settings_skips_write_when_already_enabled():
     await apply_settings(meshcore, BotConfig())
 
     meshcore.commands.set_autoadd_config.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_enables_live_contact_updates():
+    """The library only refreshes its local contact cache once by default
+    (on ensure_contacts()). An advert received after that marks the cache
+    dirty but is never re-fetched unless auto_update_contacts is on, so a
+    player who advertises after the bot has started stays invisible to
+    get_contact_by_name/get_contact_by_key_prefix until the process
+    restarts and takes a fresh snapshot. start() must turn this on so newly
+    advertised players are recognized without a restart."""
+    meshcore = _make_meshcore()
+    runner = _make_runner(meshcore)
+
+    await runner.start()
+
+    assert meshcore.auto_update_contacts is True
+    meshcore.ensure_contacts.assert_awaited_once()

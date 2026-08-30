@@ -107,6 +107,14 @@ class MeshCoreRunner:
         self.advertiser = bot.advertiser
 
     async def start(self) -> None:
+        # Without this, the library only refreshes its local contact cache
+        # once (here, on startup). A new advert received afterward marks the
+        # cache dirty but is never re-fetched, so get_contact_by_name/
+        # get_contact_by_key_prefix keep missing the new contact until the
+        # process restarts and takes a fresh snapshot. Setting this makes an
+        # ADVERTISEMENT/PATH_UPDATE push event trigger an incremental refetch
+        # immediately, so newly-advertised players are recognized live.
+        self.meshcore.auto_update_contacts = True
         await self.meshcore.ensure_contacts()
 
         self._channel_sub = self.meshcore.subscribe(
