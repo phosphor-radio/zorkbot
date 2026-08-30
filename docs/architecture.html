@@ -1,0 +1,414 @@
+<title>Zorkbot Signal Path</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --bg: #0d1210;
+  --panel: #131a17;
+  --panel-line: #23302b;
+  --ink: #d9e6df;
+  --ink-dim: #8fa39a;
+  --ink-faint: #5b6d65;
+  --accent: #ffb000;
+  --accent-dim: #9a6b1a;
+  --rule: #2a3a34;
+  --rule-strong: #3c5148;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Light theme (explicit opt-in only — this is a dark-first schematic) */
+:root[data-theme="light"] {
+  --bg: #f3f1ea;
+  --panel: #ffffff;
+  --panel-line: #d8d3c4;
+  --ink: #23281f;
+  --ink-dim: #5b5f52;
+  --ink-faint: #8b8a78;
+  --accent: #a4620a;
+  --accent-dim: #c99a4c;
+  --rule: #ded8c6;
+  --rule-strong: #bcb49a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  padding: 56px 24px 80px;
+  display: flex;
+  justify-content: center;
+}
+
+.page {
+  width: 100%;
+  max-width: 980px;
+}
+
+.masthead {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 20px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.masthead .kicker {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h1 {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: clamp(26px, 4vw, 34px);
+  margin: 6px 0 0;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.masthead-meta {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+  text-align: right;
+  line-height: 1.6;
+}
+
+.intro {
+  max-width: 62ch;
+  color: var(--ink-dim);
+  font-size: 15.5px;
+  line-height: 1.65;
+  margin: 20px 0 40px;
+}
+.intro strong { color: var(--ink); font-weight: 600; }
+
+figure {
+  margin: 0;
+  border: 1px solid var(--panel-line);
+  background: var(--panel);
+  border-radius: 3px;
+  padding: 8px;
+}
+
+figure.diagram {
+  padding: 0;
+  overflow-x: auto;
+}
+
+svg { display: block; width: 100%; height: auto; }
+
+figcaption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+  padding: 14px 18px 16px;
+  border-top: 1px solid var(--rule);
+  line-height: 1.6;
+}
+figcaption b { color: var(--ink-dim); font-weight: 500; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin: 22px 2px 46px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.legend .item { display: flex; align-items: center; gap: 8px; }
+.legend .swatch { width: 18px; height: 2px; flex: none; }
+.legend .swatch.solid { background: var(--ink-faint); }
+.legend .swatch.accent { background: var(--accent); height: 2px; }
+.legend .swatch.dash {
+  background: repeating-linear-gradient(90deg, var(--ink-faint) 0 5px, transparent 5px 9px);
+}
+
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 28px;
+  margin-top: 8px;
+}
+
+.note h2 {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.note p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+.note code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+footer {
+  margin-top: 56px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* ---- SVG element styling via currentColor ---- */
+.diagram svg { color: var(--ink); }
+.lbl { font-family: var(--mono); }
+.box-title { fill: var(--ink); font-weight: 600; }
+.box-sub { fill: var(--ink-dim); font-weight: 400; }
+.arrow-lbl { fill: var(--ink-faint); }
+.box-stroke { stroke: var(--rule-strong); fill: var(--panel); }
+.box-fill-dim { fill: var(--bg); }
+.line { stroke: var(--ink-faint); }
+.line-accent { stroke: var(--accent); }
+.dash { stroke-dasharray: 4 4; }
+.accent-text { fill: var(--accent); }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div>
+      <div class="kicker">Signal path / process diagram</div>
+      <h1>Zorkbot Architecture</h1>
+    </div>
+    <div class="masthead-meta">
+      src/zorkbot<br>
+      Python 3.13 · asyncio<br>
+      MeshCore radio ↔ zorkd
+    </div>
+  </div>
+
+  <p class="intro">
+    One process, three boundaries worth tracking: the <strong>radio link</strong> (shared, slow,
+    serialized), the <strong>per-player queue</strong> inside the bot (keeps one slow player from
+    blocking another), and the <strong>HTTP hop</strong> out to the external game service, which is
+    where the actual Zork interpreter lives.
+  </p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 980 1150" role="img" aria-label="Zorkbot processes an incoming radio message through runner.py's event handlers, into ZorkBot's per-player queue and worker, out to commands that either touch in-memory session state or call the external zorkd game service over HTTP, then back out through a single rate-limited send lock to the radio.">
+
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+        </marker>
+        <marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" class="accent-text" />
+        </marker>
+      </defs>
+
+      <!-- ============ RF BOUNDARY (top) ============ -->
+      <rect x="300" y="14" width="380" height="58" rx="2" class="box-stroke" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <text x="490" y="38" text-anchor="middle" class="lbl box-title" font-size="14">MeshCore radio device</text>
+      <text x="490" y="56" text-anchor="middle" class="lbl box-sub" font-size="11">serial / BLE / TCP — shared RF channel</text>
+
+      <!-- arrow down: inbound events -->
+      <line x1="430" y1="72" x2="430" y2="118" class="line" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="422" y="98" text-anchor="end" class="lbl arrow-lbl" font-size="11">CHANNEL_MSG_RECV</text>
+      <line x1="550" y1="72" x2="550" y2="118" class="line" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="558" y="98" text-anchor="start" class="lbl arrow-lbl" font-size="11">CONTACT_MSG_RECV (DM)</text>
+
+      <!-- arrow up: outbound, accent (the serialized path) -->
+      <line x1="680" y1="118" x2="680" y2="72" class="line-accent" stroke-width="2" marker-end="url(#arrowAccent)"/>
+      <text x="688" y="98" text-anchor="start" class="lbl accent-text" font-size="11" font-weight="600">send_msg / send_chan_msg</text>
+
+      <!-- ============ runner.py ============ -->
+      <rect x="260" y="120" width="500" height="130" rx="2" class="box-stroke" stroke-width="1.5"/>
+      <text x="280" y="144" class="lbl box-title" font-size="13">runner.py — MeshCoreRunner</text>
+      <text x="280" y="163" class="lbl box-sub" font-size="11">_on_channel_msg / _on_dm_msg → IncomingMessage</text>
+
+      <rect x="500" y="176" width="240" height="58" rx="2" class="box-stroke" stroke-width="1.25"/>
+      <text x="620" y="196" text-anchor="middle" class="lbl box-title accent-text" font-size="11.5">_send_lock (asyncio.Lock)</text>
+      <text x="620" y="212" text-anchor="middle" class="lbl box-sub" font-size="10.5">spaced by send_spacing_seconds</text>
+      <text x="620" y="226" text-anchor="middle" class="lbl box-sub" font-size="10.5">depth-capped at max_send_queue_depth</text>
+
+      <text x="280" y="235" class="lbl box-sub" font-size="10.5">every DM + channel reply funnels</text>
+      <text x="280" y="248" class="lbl box-sub" font-size="10.5">through this one gate — no exceptions</text>
+
+      <!-- advertiser feeding the lock -->
+      <rect x="30" y="164" width="190" height="66" rx="2" class="box-stroke" stroke-width="1.25"/>
+      <text x="125" y="186" text-anchor="middle" class="lbl box-title" font-size="11.5">advertiser.py</text>
+      <text x="125" y="202" text-anchor="middle" class="lbl box-sub" font-size="10">background timer +</text>
+      <text x="125" y="215" text-anchor="middle" class="lbl box-sub" font-size="10">cooldown-gated send_advert()</text>
+      <line x1="220" y1="197" x2="497" y2="200" class="line dash" stroke-width="1.25" marker-end="url(#arrow)"/>
+
+      <!-- arrow down: dispatch to bot -->
+      <line x1="430" y1="250" x2="430" y2="296" class="line" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="422" y="277" text-anchor="end" class="lbl arrow-lbl" font-size="11">dispatch_channel()</text>
+      <line x1="550" y1="250" x2="550" y2="296" class="line" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="558" y="277" text-anchor="start" class="lbl arrow-lbl" font-size="11">dispatch_dm()</text>
+
+      <!-- ============ bot.py ============ -->
+      <rect x="200" y="298" width="580" height="230" rx="2" class="box-stroke" stroke-width="1.5"/>
+      <text x="220" y="322" class="lbl box-title" font-size="13">bot.py — ZorkBot</text>
+      <text x="220" y="341" class="lbl box-sub" font-size="11">rate-check (RateLimiter, admin-exempt) → address/parse → route</text>
+
+      <!-- per-player queue/worker illustration -->
+      <rect x="220" y="358" width="150" height="54" rx="2" class="box-stroke box-fill-dim" stroke-width="1.1"/>
+      <text x="295" y="380" text-anchor="middle" class="lbl box-title" font-size="11">queue[player_id]</text>
+      <text x="295" y="396" text-anchor="middle" class="lbl box-sub" font-size="10">asyncio.Queue, size 8</text>
+
+      <line x1="370" y1="385" x2="410" y2="385" class="line" stroke-width="1.25" marker-end="url(#arrow)"/>
+
+      <rect x="412" y="358" width="150" height="54" rx="2" class="box-stroke box-fill-dim" stroke-width="1.1"/>
+      <text x="487" y="380" text-anchor="middle" class="lbl box-title" font-size="11">worker task</text>
+      <text x="487" y="396" text-anchor="middle" class="lbl box-sub" font-size="10">one per player_id, lazily spawned</text>
+
+      <line x1="562" y1="385" x2="602" y2="385" class="line" stroke-width="1.25" marker-end="url(#arrow)"/>
+
+      <rect x="604" y="358" width="150" height="54" rx="2" class="box-stroke box-fill-dim" stroke-width="1.1"/>
+      <text x="679" y="380" text-anchor="middle" class="lbl box-title" font-size="11">_handle(cmd)</text>
+      <text x="679" y="396" text-anchor="middle" class="lbl box-sub" font-size="10">routes to a command module</text>
+
+      <text x="220" y="432" class="lbl box-sub" font-size="10.5">queue full → "The bot is busy" · one player's slow turn never blocks another's</text>
+
+      <!-- command row -->
+      <g class="lbl box-sub" font-size="10.5">
+        <rect x="220" y="452" width="76" height="30" rx="2" class="box-stroke" stroke-width="1"/>
+        <text x="258" y="471" text-anchor="middle">start</text>
+
+        <rect x="304" y="452" width="76" height="30" rx="2" class="box-stroke" stroke-width="1"/>
+        <text x="342" y="471" text-anchor="middle">end</text>
+
+        <rect x="388" y="452" width="76" height="30" rx="2" class="box-stroke" stroke-width="1"/>
+        <text x="426" y="471" text-anchor="middle">list</text>
+
+        <rect x="472" y="452" width="88" height="30" rx="2" class="box-stroke" stroke-width="1"/>
+        <text x="516" y="471" text-anchor="middle">watch(ers)</text>
+
+        <rect x="568" y="452" width="76" height="30" rx="2" class="box-stroke" stroke-width="1"/>
+        <text x="606" y="471" text-anchor="middle">reset</text>
+
+        <rect x="652" y="452" width="108" height="30" rx="2" class="box-stroke" stroke-width="1.5"/>
+        <text x="706" y="471" text-anchor="middle" font-weight="600">_game (zork.py)</text>
+      </g>
+      <text x="220" y="500" class="lbl box-sub" font-size="10">commands/*.py — each takes (ctx, GameClient, SessionState, args)</text>
+
+      <!-- ============ session_state.py side box ============ -->
+      <rect x="820" y="298" width="140" height="230" rx="2" class="box-stroke" stroke-width="1.5"/>
+      <text x="890" y="322" text-anchor="middle" class="lbl box-title" font-size="12">session_state.py</text>
+      <text x="890" y="340" text-anchor="middle" class="lbl box-sub" font-size="10">in-process, in-memory</text>
+      <line x1="890" y1="352" x2="890" y2="352" />
+      <text x="836" y="372" class="lbl box-sub" font-size="9.5">· player → session #</text>
+      <text x="836" y="388" class="lbl box-sub" font-size="9.5">· watcher → session #</text>
+      <text x="836" y="404" class="lbl box-sub" font-size="9.5">· playing XOR watching</text>
+      <text x="836" y="420" class="lbl box-sub" font-size="9.5">· max watchers/session</text>
+      <text x="836" y="442" class="lbl box-sub" font-size="9.5" font-style="italic">no game text lives here —</text>
+      <text x="836" y="456" class="lbl box-sub" font-size="9.5" font-style="italic">only who's connected to what</text>
+
+      <line x1="780" y1="400" x2="817" y2="400" class="line" stroke-width="1.25" marker-end="url(#arrow)"/>
+      <line x1="817" y1="416" x2="780" y2="416" class="line" stroke-width="1.25" marker-end="url(#arrow)"/>
+      <text x="798" y="393" text-anchor="middle" class="lbl arrow-lbl" font-size="8.5">read/write</text>
+
+      <!-- fan-out to watchers, dashed, feeding back up to send lock -->
+      <path d="M 890 298 C 890 260, 780 210, 742 205" fill="none" class="line-accent dash" stroke-width="1.5" marker-end="url(#arrowAccent)"/>
+      <text x="900" y="280" text-anchor="middle" class="lbl accent-text" font-size="9.5" transform="rotate(-90 900 280)">fan-out to watchers</text>
+
+      <!-- ============ config.py side box ============ -->
+      <rect x="20" y="298" width="150" height="230" rx="2" class="box-stroke" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <text x="95" y="322" text-anchor="middle" class="lbl box-title" font-size="12">config.py</text>
+      <text x="95" y="340" text-anchor="middle" class="lbl box-sub" font-size="10">BotConfig</text>
+      <text x="36" y="364" class="lbl box-sub" font-size="9.5">zorkbot.toml</text>
+      <text x="36" y="378" class="lbl box-sub" font-size="9.5">+ GAME_URL / ADMIN_TOKEN</text>
+      <text x="36" y="378" class="lbl box-sub" font-size="9.5"></text>
+      <text x="36" y="400" class="lbl box-sub" font-size="9.5">channel index/name/secret</text>
+      <text x="36" y="416" class="lbl box-sub" font-size="9.5">admin pubkey allowlist</text>
+      <text x="36" y="432" class="lbl box-sub" font-size="9.5">rate limit, queue size,</text>
+      <text x="36" y="446" class="lbl box-sub" font-size="9.5">send spacing, advert timing</text>
+
+      <line x1="170" y1="400" x2="197" y2="400" class="line dash" stroke-width="1.1" marker-end="url(#arrow)"/>
+      <text x="183" y="393" text-anchor="middle" class="lbl arrow-lbl" font-size="8">reads</text>
+
+      <!-- ============ down to game_client ============ -->
+      <line x1="706" y1="482" x2="706" y2="560" class="line" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="714" y="524" class="lbl arrow-lbl" font-size="11">command_text, validated by sanitize.py</text>
+
+      <rect x="470" y="562" width="380" height="70" rx="2" class="box-stroke" stroke-width="1.5"/>
+      <text x="660" y="588" text-anchor="middle" class="lbl box-title" font-size="13">game_client.py — GameClient</text>
+      <text x="660" y="606" text-anchor="middle" class="lbl box-sub" font-size="11">httpx.AsyncClient — start/command/end/reset/list_sessions</text>
+      <text x="660" y="622" text-anchor="middle" class="lbl box-sub" font-size="10.5">SessionFullError · SessionNotFoundError · GameServiceError</text>
+
+      <!-- process boundary -->
+      <line x1="70" y1="666" x2="910" y2="666" class="line dash" stroke-width="1.25"/>
+      <text x="910" y="660" text-anchor="end" class="lbl arrow-lbl" font-size="10.5">process boundary — HTTP, not a function call</text>
+
+      <line x1="660" y1="632" x2="660" y2="700" class="line-accent" stroke-width="2" marker-end="url(#arrowAccent)"/>
+      <text x="668" y="668" class="lbl accent-text" font-size="11" font-weight="600">POST /sessions/&lt;id&gt;/command</text>
+
+      <rect x="440" y="702" width="440" height="76" rx="2" class="box-stroke box-fill-dim" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <text x="660" y="730" text-anchor="middle" class="lbl box-title" font-size="13">zorkd — external game service</text>
+      <text x="660" y="750" text-anchor="middle" class="lbl box-sub" font-size="11">runs the Zork I interpreter · owns the session pool + saves</text>
+      <text x="660" y="766" text-anchor="middle" class="lbl box-sub" font-size="10.5">out of scope for this repo — reached at GAME_URL</text>
+
+      <!-- ============ packetize path back up ============ -->
+      <path d="M 470 596 C 300 596, 130 500, 130 420 C 130 340, 220 300, 260 296" fill="none" class="line-accent" stroke-width="2" marker-start="url(#arrowAccent)"/>
+      <text x="150" y="430" class="lbl accent-text" font-size="10.5" font-weight="600" transform="rotate(-90 150 430)">packetize() → reply / reply_many</text>
+
+      <!-- caption row at very bottom -->
+      <rect x="20" y="800" width="940" height="1" class="line" />
+    </svg>
+  </figure>
+
+  <div class="legend">
+    <div class="item"><span class="swatch accent"></span> serialized RF send path (through the one send lock)</div>
+    <div class="item"><span class="swatch solid"></span> in-process call / dispatch</div>
+    <div class="item"><span class="swatch dash"></span> config read or process/HTTP boundary</div>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h2>Why a queue per player</h2>
+      <p>
+        <code>ZorkBot._enqueue()</code> gives each <code>pubkey_prefix</code> its own
+        bounded <code>asyncio.Queue</code> and worker task. A slow game turn for one
+        player never delays another's — they're isolated queues, not a shared one.
+      </p>
+    </div>
+    <div class="note">
+      <h2>Why one send lock</h2>
+      <p>
+        Radio bandwidth is the real bottleneck. <code>runner.py</code> routes every
+        outbound packet — channel replies, DMs, watcher fan-out, adverts — through a
+        single <code>asyncio.Lock</code> spaced by <code>send_spacing_seconds</code>,
+        so the mesh never sees a burst.
+      </p>
+    </div>
+    <div class="note">
+      <h2>Where the game actually runs</h2>
+      <p>
+        Zorkbot holds no Zork state. <code>game_client.py</code> is a thin HTTP client;
+        the interpreter, session pool, and save files live in a separate <code>zorkd</code>
+        process reached at <code>GAME_URL</code>.
+      </p>
+    </div>
+  </div>
+
+  <footer>src/zorkbot — traced from bot.py, runner.py, game_client.py, session_state.py, config.py, advertiser.py</footer>
+
+</div>
