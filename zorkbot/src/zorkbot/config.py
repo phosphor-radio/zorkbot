@@ -24,6 +24,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "max_watchers_per_session",
     "session_inactivity_seconds",
     "session_idle_start_seconds",
+    "advert_enabled",
     "advert_interval_seconds",
     "advert_cooldown_seconds",
     "send_spacing_seconds",
@@ -59,6 +60,7 @@ class BotConfig:
     session_idle_start_seconds: int = 300
 
     # Advertising
+    advert_enabled: bool = False
     advert_interval_seconds: int = 300
     advert_cooldown_seconds: int = 300
 
@@ -117,6 +119,9 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.session_inactivity_seconds = int(session_inactivity_seconds)
     if session_idle_start_seconds := _root_value(data, channel, admin, "session_idle_start_seconds"):
         config.session_idle_start_seconds = int(session_idle_start_seconds)
+    advert_enabled = _root_value(data, channel, admin, "advert_enabled")
+    if advert_enabled is not None:
+        config.advert_enabled = bool(advert_enabled)
     if advert_interval_seconds := _root_value(data, channel, admin, "advert_interval_seconds"):
         config.advert_interval_seconds = int(advert_interval_seconds)
     if advert_cooldown_seconds := _root_value(data, channel, admin, "advert_cooldown_seconds"):

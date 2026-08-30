@@ -81,6 +81,7 @@ async def run(args: argparse.Namespace) -> None:
                         "could not determine bot name; set name in config or --name"
                     )
             advertiser = Advertiser(
+                enabled=config.advert_enabled,
                 interval_seconds=config.advert_interval_seconds,
                 cooldown_seconds=config.advert_cooldown_seconds,
             )

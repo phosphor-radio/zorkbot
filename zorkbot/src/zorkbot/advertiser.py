@@ -14,21 +14,31 @@ logger = logging.getLogger(__name__)
 
 
 class Advertiser:
-    """Manages periodic and on-demand advert sending with a cooldown gate."""
+    """Manages periodic and on-demand advert sending with a cooldown gate.
+
+    When *enabled* is False all methods are no-ops; no adverts are sent and
+    no background task is started.  Set advert_enabled = true in zorkbot.toml
+    for a live server.
+    """
 
     def __init__(
         self,
         *,
+        enabled: bool = False,
         interval_seconds: int = 300,
         cooldown_seconds: int = 300,
     ) -> None:
+        self._enabled = enabled
         self._interval = interval_seconds
         self._cooldown = cooldown_seconds
         self._last_sent_at: float = 0.0
         self._task: asyncio.Task[None] | None = None
 
     def start(self, meshcore: object) -> None:
-        """Start the background timer task."""
+        """Start the background timer task.  No-op when disabled."""
+        if not self._enabled:
+            logger.debug("adverts disabled — background timer not started")
+            return
         if self._task is None:
             self._task = asyncio.create_task(
                 self._loop(meshcore),
@@ -45,8 +55,9 @@ class Advertiser:
             self._task = None
 
     async def send_if_due(self, meshcore: object) -> None:
-        """Send an advert if the cooldown has elapsed.  Safe to call from any
-        coroutine (e.g. on !start)."""
+        """Send an advert if the cooldown has elapsed.  No-op when disabled."""
+        if not self._enabled:
+            return
         now = time.monotonic()
         if now - self._last_sent_at < self._cooldown:
             logger.debug(
