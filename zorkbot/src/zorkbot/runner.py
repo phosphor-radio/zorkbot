@@ -46,6 +46,14 @@ async def connect(
     return await MeshCore.create_tcp(host, int(port or 5000))
 
 
+# autoadd_config bit 0: evict the oldest non-favourite contact when the
+# radio's contact table (100 slots) is full, instead of silently dropping
+# the new advert. Off by default in firmware. A bot radio has no reason to
+# prefer dropping new players over LRU-evicting stale contacts, so this is
+# applied unconditionally rather than gated behind a config option.
+_AUTOADD_OVERWRITE_OLDEST = 0x01
+
+
 async def apply_settings(meshcore: MeshCore, config: BotConfig) -> None:
     if config.name:
         result = await meshcore.commands.set_name(config.name)
@@ -57,6 +65,23 @@ async def apply_settings(meshcore: MeshCore, config: BotConfig) -> None:
         channel.secret,
     )
     _log_apply(f"channel {channel.index} name={channel.name!r}", result)
+
+    await _ensure_contacts_overwrite_oldest(meshcore)
+
+
+async def _ensure_contacts_overwrite_oldest(meshcore: MeshCore) -> None:
+    current = await meshcore.commands.get_autoadd_config()
+    if current.type == EventType.ERROR:
+        logger.warning("failed to read autoadd config: %r", current.payload)
+        return
+
+    flag = current.payload.get("config", 0)
+    if flag & _AUTOADD_OVERWRITE_OLDEST:
+        logger.info("contact table overwrite-oldest already enabled")
+        return
+
+    result = await meshcore.commands.set_autoadd_config(flag | _AUTOADD_OVERWRITE_OLDEST)
+    _log_apply("contact table overwrite-oldest on full", result)
 
 
 def _log_apply(description: str, result: Event) -> None:

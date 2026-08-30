@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from meshcore.events import Event, EventType
 
-from zorkbot.runner import MeshCoreRunner
+from zorkbot.config import BotConfig
+from zorkbot.runner import apply_settings, MeshCoreRunner
 
 PUBKEY_PREFIX = "aabbccddeeff"
 PLAYER_NAME = "Alice"
@@ -67,3 +68,49 @@ async def test_channel_msg_unknown_sender_has_no_pubkey_prefix():
 
     message = runner.bot.dispatch_channel.call_args[0][0]
     assert message.pubkey_prefix is None
+
+
+def _make_settings_meshcore(current_autoadd_config: int):
+    mc = MagicMock()
+    mc.commands.set_name = AsyncMock(return_value=Event(EventType.OK, {}))
+    mc.commands.set_channel = AsyncMock(return_value=Event(EventType.OK, {}))
+    mc.commands.get_autoadd_config = AsyncMock(
+        return_value=Event(EventType.AUTOADD_CONFIG, {"config": current_autoadd_config})
+    )
+    mc.commands.set_autoadd_config = AsyncMock(return_value=Event(EventType.OK, {}))
+    return mc
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_enables_contact_overwrite_when_disabled():
+    """The radio's 100-slot contact table silently drops new player adverts
+    once full unless overwrite-oldest is enabled — off by default in
+    firmware. zorkbot has no reason to prefer dropping new players over
+    evicting stale contacts, so this must be turned on unconditionally at
+    startup."""
+    meshcore = _make_settings_meshcore(current_autoadd_config=0x00)
+
+    await apply_settings(meshcore, BotConfig())
+
+    meshcore.commands.set_autoadd_config.assert_awaited_once_with(0x01)
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_preserves_other_autoadd_bits():
+    """set_autoadd_config replaces the whole config byte on the device, so
+    enabling overwrite-oldest must OR into the existing value rather than
+    stomp any operator-configured auto-add-type restriction bits."""
+    meshcore = _make_settings_meshcore(current_autoadd_config=0x04)  # AUTO_ADD_REPEATER
+
+    await apply_settings(meshcore, BotConfig())
+
+    meshcore.commands.set_autoadd_config.assert_awaited_once_with(0x05)
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_skips_write_when_already_enabled():
+    meshcore = _make_settings_meshcore(current_autoadd_config=0x01)
+
+    await apply_settings(meshcore, BotConfig())
+
+    meshcore.commands.set_autoadd_config.assert_not_awaited()

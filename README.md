@@ -75,6 +75,12 @@ MeshCore DMs require the recipient's public key to be in the firmware's contact 
 
 If a player issues `!start` on the channel but the bot has not received their advert yet, it replies: *"DM me !start — I don't have you in my contacts yet."*
 
+### Contact table capacity
+
+The companion radio's contact table holds 100 entries. By default, once full, the firmware silently drops adverts from new nodes instead of adding them — which would eventually make new players indistinguishable from ones who've never advertised (same "not in my contacts yet" symptom, but permanent no matter how many times they DM). At startup zorkbot enables the firmware's overwrite-oldest-on-full behavior (`apply_settings` in [`runner.py`](zorkbot/src/zorkbot/runner.py)), so once the table fills, the least-recently-active contact is evicted to make room rather than the new one being rejected — the same LRU trade-off zorkbot already makes for idle game sessions, one layer down at the radio.
+
+
+
 ## Prerequisites
 
 - Docker and Docker Compose (recommended for deployment)
