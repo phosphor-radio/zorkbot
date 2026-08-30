@@ -32,6 +32,14 @@ bot's contact table (the firmware decrypted it), so the bot can always DM back. 
 `!start` on the `#zork` channel may not yet be a contact; the bot checks
 `meshcore.get_contact_by_key_prefix(pubkey_prefix)` before attempting a DM.
 
+**Contact table capacity**: the companion radio's contact table holds 100 entries. By default,
+once full, the firmware silently drops adverts from new nodes instead of adding them, which would
+eventually make new players permanently indistinguishable from unknown senders — regardless of how
+many times they advertise or DM — with no way to fix it. `MeshCoreRunner.start()` (via
+`apply_settings`) enables the firmware's overwrite-oldest-on-full behavior (`autoadd_config` bit
+0) unconditionally at startup, so the least-recently-active contact is evicted to make room
+instead — the same LRU trade-off as the idle-session timeouts above, one layer down at the radio.
+
 ---
 
 ## Architecture
@@ -66,12 +74,33 @@ bot's contact table (the firmware decrypted it), so the bot can always DM back. 
 
 ## Player Identity
 
-Both `CHANNEL_MSG_RECV` and `CONTACT_MSG_RECV` events carry `pubkey_prefix` (12 hex chars, 6
-bytes) in `event.payload`. This is the stable cryptographic identity used as the session key
-throughout. It cannot be spoofed because it is derived from the node's private key.
+`pubkey_prefix` (12 hex chars, 6 bytes) is the stable cryptographic identity used as the session
+key throughout. It cannot be spoofed because it is derived from the node's private key. The two
+event types carry it very differently, however:
 
-`sender_name` for display purposes is looked up from `meshcore.get_contact_by_key_prefix()
-["adv_name"]`, falling back to `pubkey_prefix[:8]` if the contact is not in the table.
+- **`CONTACT_MSG_RECV` (DM)**: carries `pubkey_prefix` directly in `event.payload` (6 raw bytes on
+  the wire). `sender_name` for display is looked up from
+  `meshcore.get_contact_by_key_prefix()["adv_name"]`, falling back to `pubkey_prefix[:8]` if the
+  contact is not in the table.
+- **`CHANNEL_MSG_RECV`**: carries **no sender key material at all** — group-channel packets have
+  no per-sender identity field on the wire (they're pre-shared-key broadcasts). Sender identity is
+  reconstructed by parsing the `"Name: text"` convention companion apps embed in the message text,
+  then resolving `pubkey_prefix` via `meshcore.get_contact_by_name(sender_name)`. This only works
+  for senders already in the bot's *local* contact cache — see the note on `auto_update_contacts`
+  below.
+
+Both resolutions happen in `runner.py`'s `_on_dm_msg` / `_on_channel_msg`.
+
+### Contact cache freshness
+
+The `meshcore` library's local contact cache is not the same thing as the radio's live contact
+table, and the two can diverge. The library only takes a full snapshot once by default (on
+connect); a contact added afterward — including one whose advert makes DMs to it start working
+immediately, since that decryption happens on-device — only marks the cache stale, not
+re-fetched, unless `auto_update_contacts` is enabled. `MeshCoreRunner.start()` enables it, so an
+`ADVERTISEMENT`/`PATH_UPDATE` push event triggers an incremental re-sync immediately. Without
+this, a channel `!start` from a newly-advertised player fails to identify them until the bot
+process restarts and takes a fresh snapshot.
 
 ---
 
@@ -103,7 +132,7 @@ or already watching.
 
 | Command | Where | Description |
 |---------|-------|-------------|
-| `!help` / `!commands` | channel or DM | List available commands |
+| `!help` / `!commands` | channel or DM | List available commands; adds `!rules` when sent via DM with an active (non-watching) session |
 | `!start` | channel or DM | Start or restore session; triggers advert |
 | `!end` | channel or DM | Save and end active session, or end a watch |
 | `!end <N>` | DM, admin only | Force-end session N |
@@ -111,7 +140,9 @@ or already watching.
 | `!watch <N>` | channel or DM | Observe session N via DMs |
 | `!watchers` | channel or DM | List all watchers and which session they observe |
 | `!reset` | DM only | Wipe save and start a fresh session immediately |
-| `!author` | channel or DM | Attribution |
+| `!rules` | DM only | Basic game rules and example commands; requires an active (non-watching) session |
+| `!author` (alias `!source`) | channel or DM | Attribution; `!source` is a hidden alias, not shown in `!help` |
+| `!bots` | channel or DM | Mesh bot roll call; replies after a fixed 5s delay so multiple bots don't collide on the air |
 | bare text in DM | DM | If session active: game command. If no session: prompt to `!start` |
 
 ### `!start` on channel
@@ -204,7 +235,7 @@ On reset all files in the directory are deleted.
 | Concern | Mitigation |
 |---------|-----------|
 | Admin name spoofing | Admin auth uses `pubkey_prefix` only (`admin_pubkeys` in config); `admin_names` removed |
-| Session pool exhaustion | `session_idle_start_seconds` (5 min): slots from no-command sessions are released automatically |
+| Session pool exhaustion | game service's `SESSION_IDLE_START_SECONDS` (5 min): slots from no-command sessions are released automatically |
 | Watcher spam | One active state per player (play OR watch); `max_watchers_per_session` (default 2) |
 | Path traversal in Go API | `player_id` validated as `^[0-9a-f]{12}$` before any file path use |
 | Watching is public | By design; `!list` and `!watchers` are openly visible |
@@ -229,9 +260,6 @@ dropped with a warning log.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `max_active_sessions` | 8 | Max concurrent PTY processes |
-| `session_inactivity_seconds` | 1800 | Idle timeout after first command |
-| `session_idle_start_seconds` | 300 | Idle timeout before first command (anti-squat) |
 | `max_watchers_per_session` | 2 | Max observers per session |
 | `advert_enabled` | false | Enable advert sending; must be true on a live server |
 | `advert_flood` | true | true = flood (whole mesh); false = zerohop (direct only) |
@@ -240,6 +268,12 @@ dropped with a warning log.
 | `send_spacing_seconds` | 2.0 | Minimum gap between RF transmissions |
 | `max_send_queue_depth` | 64 | Max queued packets before overflow drops |
 | `[admin] pubkeys` | [] | Pubkey prefixes (12 hex chars) of admin users |
+
+The PTY pool cap and idle/inactivity timeouts (described above, in "RF Send Serialization" and the
+SessionPool section) belong entirely to the `game` service, controlled by its own
+`MAX_ACTIVE_SESSIONS` / `SESSION_INACTIVITY_SECONDS` / `SESSION_IDLE_START_SECONDS` environment
+variables (see `docker-compose.yml`) — `zorkbot.toml` has no equivalent keys, since the bot itself
+never enforces a pool cap or session timeout.
 
 ---
 

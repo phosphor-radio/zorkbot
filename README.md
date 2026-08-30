@@ -346,10 +346,7 @@ announce_on_start = false
 rate_limit_seconds = 3.0
 
 # Session management
-max_active_sessions = 8         # max concurrent PTY processes
 max_watchers_per_session = 2    # observers per session
-session_inactivity_seconds = 1800   # auto-save after 30 min idle
-session_idle_start_seconds = 300    # release slot if no command in 5 min
 
 # Advertising
 # MUST be set to true on a live server so players can discover the bot
@@ -505,7 +502,7 @@ Used by the bot over the Docker network. Not intended for public exposure. `play
 | Game unhealthy | `docker compose logs game`; confirm `games/zork1.z3` exists |
 | Bot ignores channel messages | `[channel].index` in TOML vs actual mesh channel slot |
 | `!start` says "not in contacts" | Send `!start` via DM instead; or wait for next advert cycle |
-| Session slot full | Increase `max_active_sessions` or wait for idle sessions to time out |
+| Session slot full | Increase `MAX_ACTIVE_SESSIONS` in `.env` (game service) or wait for idle sessions to time out |
 | Build kills SSH / shell | Low RAM; add swap and use `COMPOSE_PARALLEL_LIMIT=1` |
 | SD card filling with logs | Compose caps logs at 10 MB × 3 files per service |
 | Follow one player in logs | `docker compose logs zorkbot \| grep player=<prefix8>` |

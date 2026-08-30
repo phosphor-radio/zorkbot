@@ -20,10 +20,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "announce_on_start",
     "command_queue_size",
     "rate_limit_seconds",
-    "max_active_sessions",
     "max_watchers_per_session",
-    "session_inactivity_seconds",
-    "session_idle_start_seconds",
     "advert_enabled",
     "advert_flood",
     "advert_interval_seconds",
@@ -55,10 +52,7 @@ class BotConfig:
     rate_limit_seconds: float = 3.0
 
     # Session management
-    max_active_sessions: int = 8
     max_watchers_per_session: int = 2
-    session_inactivity_seconds: int = 1800
-    session_idle_start_seconds: int = 300
 
     # Advertising
     advert_enabled: bool = False
@@ -113,14 +107,8 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.command_queue_size = int(command_queue_size)
     if rate_limit_seconds := _root_value(data, channel, admin, "rate_limit_seconds"):
         config.rate_limit_seconds = float(rate_limit_seconds)
-    if max_active_sessions := _root_value(data, channel, admin, "max_active_sessions"):
-        config.max_active_sessions = int(max_active_sessions)
     if max_watchers_per_session := _root_value(data, channel, admin, "max_watchers_per_session"):
         config.max_watchers_per_session = int(max_watchers_per_session)
-    if session_inactivity_seconds := _root_value(data, channel, admin, "session_inactivity_seconds"):
-        config.session_inactivity_seconds = int(session_inactivity_seconds)
-    if session_idle_start_seconds := _root_value(data, channel, admin, "session_idle_start_seconds"):
-        config.session_idle_start_seconds = int(session_idle_start_seconds)
     advert_enabled = _root_value(data, channel, admin, "advert_enabled")
     if advert_enabled is not None:
         config.advert_enabled = bool(advert_enabled)

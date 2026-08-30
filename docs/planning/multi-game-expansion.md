@@ -335,12 +335,15 @@ bot**. Multiplayer multiplies demand per turn:
 | 2-player game | + 1 opponent broadcast |
 | with 2 watchers per participant | + up to 4 more |
 
-At `max_active_sessions = 8`, a stack of multiplayer games with watchers overruns the 64-deep
-queue and starves every other player. Mitigations, all of which belong in v1:
+At the game service's default `MAX_ACTIVE_SESSIONS=8`, a stack of multiplayer games with watchers
+overruns the 64-deep queue and starves every other player. Mitigations, all of which belong in v1:
 
-1. **A bot-level global concurrent-session cap** across all games. Today `max_active_sessions` is
-   one bot-side number matching one engine's pool; with N engines each enforcing their own cap,
-   nothing bounds the total. The bot must own the global budget.
+1. **A bot-level global concurrent-session cap** across all games. Today the bot enforces no cap
+   of its own at all — `MAX_ACTIVE_SESSIONS` is purely an env var on the single `game` service's
+   pool. With N engines each enforcing their own independent cap, nothing bounds the total across
+   all of them. The bot must own a global budget, which means introducing a real bot-side
+   `max_active_sessions` config for the first time (see [Config](#config) below) — not reusing an
+   existing one, since none currently exists.
 2. **A per-turn packet cap** (`max_packets_per_turn`), truncating pathological engine output.
 3. **Watchers count against the budget.** Consider disabling watchers for multiplayer games in
    v1 — spectating chess is low value relative to the airtime it costs.
