@@ -67,7 +67,7 @@ The `game` service runs up to `MAX_ACTIVE_SESSIONS` (default 8) PTY processes si
 
 ### Player identity
 
-Both `CHANNEL_MSG_RECV` and `CONTACT_MSG_RECV` events carry `pubkey_prefix` — a cryptographic identifier derived from the node's private key. It is used as the session key throughout and cannot be spoofed.
+`CONTACT_MSG_RECV` (DM) events carry `pubkey_prefix` directly — a cryptographic identifier derived from the node's private key, used as the session key throughout and unspoofable. `CHANNEL_MSG_RECV` events carry no sender key material at all (group-channel packets have no per-sender identity field on the wire); the bot instead parses the `"Name: text"` convention companion apps use and resolves `pubkey_prefix` via a contact-table lookup by name. This only works for senders already in the bot's contact table — see the advert requirement below.
 
 ### Advert requirement for DMs
 

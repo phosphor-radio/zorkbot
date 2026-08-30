@@ -140,6 +140,9 @@ class MeshCoreRunner:
         payload = event.payload
         channel_idx = payload.get("channel_idx", 0)
         raw_text = payload.get("text", "")
+        # CHANNEL_MSG_RECV packets carry no sender key material — group-channel
+        # messages are pre-shared-key broadcasts with no per-sender identity
+        # field on the wire. Only CONTACT_MSG_RECV (DMs) has pubkey_prefix.
         pubkey_prefix = payload.get("pubkey_prefix")
 
         sender_name, sep, body = raw_text.partition(":")
@@ -149,6 +152,16 @@ class MeshCoreRunner:
         else:
             sender_name = None
             text = raw_text
+
+        # Resolve identity from the contact table via the sender name embedded
+        # in the channel text (the "Name: text" convention companion apps use).
+        # This is the only source of pubkey_prefix for channel messages.
+        if not pubkey_prefix and sender_name:
+            contact = self.meshcore.get_contact_by_name(sender_name)
+            if contact:
+                public_key = contact.get("public_key", "")
+                if public_key:
+                    pubkey_prefix = public_key[:12]
 
         # Resolve display name from contact table if not in message text.
         if not sender_name and pubkey_prefix:
