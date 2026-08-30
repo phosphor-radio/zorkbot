@@ -23,5 +23,5 @@ __pycache__/
 *.swp
 .env
 
-# Cross-build image tarballs (docker save) in repo root
+# Image tarballs (docker save) in repo root
 /*.tar.gz

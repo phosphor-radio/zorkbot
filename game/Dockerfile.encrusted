@@ -1,0 +1,24 @@
+# Standalone encrusted build.
+#
+# encrusted is a third-party Z-machine interpreter that changes far less often
+# than zorkd does, but compiling it takes an hour or more on a Pi Zero. Building
+# it as its own tagged image means `docker compose build game` never has to
+# repeat that work — see game/Dockerfile and the README.
+#
+# Build once (from the game/ directory):
+#
+#   docker build -t zorkbot-encrusted:1.1.0 -f Dockerfile.encrusted .
+#
+# Bump the --version below and rebuild under the new tag to upgrade encrusted;
+# game/Dockerfile's ENCRUSTED_IMAGE default must be updated to match.
+#
+# Omit --platform so BuildKit defaults to $TARGETPLATFORM, producing a binary
+# for the correct arch.
+FROM rust:1-bookworm AS build
+ENV CARGO_BUILD_JOBS=1
+RUN cargo install encrusted --bin encrusted --version 1.1.0 --locked
+
+# Ship only the binary (~2.3 MB) rather than the ~1.5 GB Rust toolchain, so this
+# image stays cheap to keep around, `docker save`, or copy between hosts.
+FROM scratch
+COPY --from=build /usr/local/cargo/bin/encrusted /encrusted

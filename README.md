@@ -152,9 +152,11 @@ getent group dialout
 # update MESHCORE_GROUP_GID in .env
 ```
 
-### Build on the Pi
+### Build the encrusted image (one-time)
 
-The **game** image compiles encrusted from source (Rust). On a Pi Zero, add swap first:
+The `game` service needs [encrusted](https://github.com/DeMille/encrusted), a Rust Z-machine interpreter. Compiling it takes an hour or more on a Pi Zero, but it changes far less often than `zorkd` does — so it is built **once** as its own pinned image ([`game/Dockerfile.encrusted`](game/Dockerfile.encrusted)) and referenced by tag from [`game/Dockerfile`](game/Dockerfile). A `FROM <local tag>` reference resolves from the local image store and never rebuilds, so it survives `docker save`/`load` (which discards build cache) and base-image tag movement.
+
+On a Pi Zero, add swap before this build:
 
 ```bash
 sudo dphys-swapfile swapoff
@@ -162,53 +164,46 @@ sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
 sudo dphys-swapfile setup && sudo dphys-swapfile swapon
 ```
 
-Build one service at a time:
+Then build it (once — expect an hour or more on a Pi Zero):
+
+```bash
+cd game && nohup docker build -t zorkbot-encrusted:1.1.0 -f Dockerfile.encrusted . > ~/build-encrusted.log 2>&1 &
+tail -f ~/build-encrusted.log
+```
+
+The resulting image is just the 2.3 MB binary on `scratch`. Verify with `docker images zorkbot-encrusted`.
+
+**Back it up** so a reflash or `docker system prune` doesn't cost another hour:
+
+```bash
+docker save zorkbot-encrusted:1.1.0 | gzip > ~/zorkbot-encrusted-1.1.0.tar.gz
+# restore with:  gunzip -c ~/zorkbot-encrusted-1.1.0.tar.gz | docker load
+```
+
+> **The active buildx builder must use the `docker` driver** (the out-of-the-box default, and all a fresh Pi will have). A `docker-container` builder cannot see the local image store, so `FROM zorkbot-encrusted:1.1.0` fails to resolve and tries to pull it from Docker Hub instead. This applies to `docker compose build` too, which routes through buildx. Check and fix with:
+>
+> ```bash
+> docker buildx ls          # the * marks the active builder; it should use DRIVER "docker"
+> docker buildx use default
+> ```
+
+### Build on the Pi
+
+With `zorkbot-encrusted:1.1.0` present, `game` is only a Go compile — seconds, not hours:
 
 ```bash
 export COMPOSE_PARALLEL_LIMIT=1
-nohup docker compose build game > ~/build-game.log 2>&1 &
-tail -f ~/build-game.log
+docker compose build game
 docker compose build zorkbot
 ```
 
-The first `game` build on a Pi Zero can take an hour or more. Prefer [cross-building](#cross-build-on-another-machine) if you have a faster machine.
+If `docker compose build game` fails with a missing-image error for `zorkbot-encrusted:1.1.0`, build it first — see [above](#build-the-encrusted-image-one-time).
 
-### Cross-build on another machine
+Both images build natively on the Pi in seconds, so there is no cross-compilation workflow: `zorkbot` is a plain `pip install`, and `game` cross-compiles the Go wrapper via `GOOS`/`GOARCH` on whatever host runs the build. Only encrusted is expensive, and emulated arm64 compilation is no faster than building it once on the Pi.
 
-Build `linux/arm64` images on a faster host, transfer to the Pi, and start Compose without compiling on the Pi.
+### Upgrading encrusted
 
-#### One-time setup on the build machine
-
-```bash
-docker buildx create --name zorkbot-builder --driver docker-container --use 2>/dev/null \
-  || docker buildx use zorkbot-builder
-docker buildx inspect --bootstrap
-docker run --privileged --rm tonistiigi/binfmt --install all   # Linux amd64 only
-```
-
-#### Build images
-
-```bash
-docker buildx build --platform linux/arm64 -t zorkbot-game:latest    --load ./game
-docker buildx build --platform linux/arm64 -t zorkbot-zorkbot:latest --load ./zorkbot
-```
-
-#### Transfer to the Pi
-
-```bash
-docker save zorkbot-game:latest zorkbot-zorkbot:latest | gzip > zorkbot-images-arm64.tar.gz
-scp zorkbot-images-arm64.tar.gz pi@pizero.local:~/zorkbot/
-```
-
-#### On the Pi
-
-```bash
-cd ~/zorkbot
-gunzip -c zorkbot-images-arm64.tar.gz | docker load
-docker compose up -d --no-build
-```
-
-`--no-build` tells Compose to use the loaded images. If your checkout directory is not `zorkbot`, set `COMPOSE_PROJECT_NAME=zorkbot`.
+Bump `--version` in [`game/Dockerfile.encrusted`](game/Dockerfile.encrusted) and the `ENCRUSTED_IMAGE` default in [`game/Dockerfile`](game/Dockerfile) to the same new tag, then rebuild the encrusted image once. Keeping the two in sync is what makes the upgrade deliberate rather than silent.
 
 ### Start the stack
 
@@ -254,8 +249,6 @@ chmod 700 data/saves
 
 ### Updates
 
-**On the Pi** (native build):
-
 ```bash
 git pull
 export COMPOSE_PARALLEL_LIMIT=1
@@ -264,7 +257,7 @@ docker compose build zorkbot
 docker compose up -d
 ```
 
-**Cross-built images:** rebuild on the desktop, transfer, `docker load`, then `docker compose up -d --no-build`.
+Both builds are fast — `game` recompiles only the Go wrapper, reusing the pinned `zorkbot-encrusted` image. Rust is recompiled only when you deliberately [upgrade encrusted](#upgrading-encrusted).
 
 ## Commands
 
@@ -499,7 +492,9 @@ protection is network isolation: the `game` service is `expose`d (container-netw
 | Bot ignores channel messages | `[channel].index` in TOML vs actual mesh channel slot |
 | `!start` says "not in contacts" | Send `!start` via DM instead; or wait for next advert cycle |
 | Session slot full | Increase `MAX_ACTIVE_SESSIONS` in `.env` (game service) or wait for idle sessions to time out |
-| Build kills SSH / shell | Low RAM; add swap and use `COMPOSE_PARALLEL_LIMIT=1` |
+| Build kills SSH / shell | Low RAM; add swap and use `COMPOSE_PARALLEL_LIMIT=1` (only the one-time encrusted build is heavy) |
+| `zorkbot-encrusted:1.1.0` not found | Build it once — see [Build the encrusted image](#build-the-encrusted-image-one-time) |
+| `game` build: `zorkbot-encrusted:1.1.0 ... pull access denied` | The active buildx builder uses the `docker-container` driver and can't see local images; `docker buildx use default` |
 | SD card filling with logs | Compose caps logs at 10 MB × 3 files per service |
 | Follow one player in logs | `docker compose logs zorkbot \| grep player=<prefix8>` |
 
@@ -507,6 +502,8 @@ protection is network isolation: the `game` service is `expose`d (container-netw
 
 ```
 game/           Go HTTP wrapper (zorkd) + SessionPool around encrusted
+  Dockerfile              game image; references the pinned encrusted image
+  Dockerfile.encrusted    standalone encrusted build (rebuilt only on upgrade)
 zorkbot/        Python MeshCore bot (per-player sessions, DM routing)
 docs/specs/     Feature specifications
 games/          Story file mount point (zork1.z3 not committed)

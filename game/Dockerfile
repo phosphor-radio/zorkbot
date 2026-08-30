@@ -1,14 +1,21 @@
-# Build encrusted for the target platform.
-# Omit --platform so BuildKit defaults to $TARGETPLATFORM, producing a
-# binary for the correct arch.  The Go stage explicitly uses
-# $BUILDPLATFORM because it cross-compiles via GOOS/GOARCH.
-FROM rust:1-bookworm AS encrusted-builder
-ENV CARGO_BUILD_JOBS=1
-RUN cargo install encrusted --bin encrusted --locked
+# encrusted is built separately and referenced here as a pinned image, because
+# compiling it takes an hour or more on a Pi Zero and it changes far less often
+# than zorkd does. A `FROM <local tag>` reference resolves from the local image
+# store and never rebuilds, so it survives `docker save`/`load` (which discards
+# build cache) and base-image tag movement.
+#
+# Bootstrap it once — see game/Dockerfile.encrusted and the README:
+#
+#   docker build -t zorkbot-encrusted:1.1.0 -f Dockerfile.encrusted .
+#
+# Override with --build-arg ENCRUSTED_IMAGE=... to test a different build.
+ARG ENCRUSTED_IMAGE=zorkbot-encrusted:1.1.0
 
-# Build the Go HTTP wrapper after encrusted (serializes BuildKit stages for low-RAM hosts).
+FROM ${ENCRUSTED_IMAGE} AS encrusted
+
+# The Go wrapper cross-compiles via GOOS/GOARCH, so it always builds natively on
+# $BUILDPLATFORM regardless of the target arch.
 FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS go-builder
-COPY --from=encrusted-builder /usr/local/cargo/bin/encrusted /tmp/.encrusted-built
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
@@ -22,7 +29,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=encrusted-builder /usr/local/cargo/bin/encrusted /usr/local/bin/encrusted
+COPY --from=encrusted /encrusted /usr/local/bin/encrusted
 COPY --from=go-builder /zorkd /usr/local/bin/zorkd
 
 RUN mkdir -p /data /game
