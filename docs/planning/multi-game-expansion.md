@@ -1,8 +1,8 @@
 # Multi-Game Bot — Expansion Plan
 
-**Status:** Proposed (Revision 2)
+**Status:** Proposed (Revision 3)
 **Created:** 2026-08-30
-**Revised:** 2026-08-30 — implementation review; see [Revision history](#revision-history)
+**Revised:** 2026-08-30 — `ADMIN_TOKEN` removal; see [Revision history](#revision-history)
 **Builds on:** [`docs/specs/dm-sessions.md`](../specs/dm-sessions.md), current `zorkbot` architecture
 
 ## Summary
@@ -82,8 +82,9 @@ and airtime limits, and moves text between DMs and HTTP calls.
 > `players` in its session list, and no auth. The single-player *model* degenerates cleanly, but
 > the **wire format changes** and zorkd must be updated. Budget that work explicitly in phase 2.
 
-All requests carry `Authorization: Bearer <ADMIN_TOKEN>`; engines MUST reject requests without it
-(see [Security model](#security-model)).
+All requests carry `Authorization: Bearer <ENGINE_API_TOKEN>`; engines MUST reject requests without
+it (see [Security model](#security-model) — this is a new secret, introduced for this contract,
+not a revival of the now-removed `ADMIN_TOKEN`).
 
 | Method & path | Purpose |
 |---|---|
@@ -278,17 +279,20 @@ Writing it down is a prerequisite, not a nicety.
 
 ### Engine API authentication (currently absent)
 
-`ADMIN_TOKEN` is **dead code on both sides today**: `NewServer` stores `adminToken` and no handler
-ever checks it ([`server.go:23-30`](../../game/internal/api/server.go)), and `GameClient` stores
-`admin_token` and never sends it. The engine API is entirely unauthenticated; it is protected only
-by compose using `expose:` rather than `ports:`, so it is unreachable from the host but reachable
-by any container on the network.
+`ADMIN_TOKEN` **was dead code and has since been removed entirely** (both `NewServer`'s
+`adminToken` field and `GameClient`'s `admin_token` are gone — see the corrected README and
+`dm-sessions.md`). It was read on both sides but never checked or sent anywhere. The engine API is
+entirely unauthenticated today; it is protected only by compose using `expose:` rather than
+`ports:`, so it is unreachable from the host but reachable by any container on the network. That
+was a deliberate choice (documented network isolation over a config field implying protection it
+didn't provide) and remains the right call for a single-engine deployment.
 
-That is thin for one engine and worse for N. Since the wire format is changing anyway, wire the
-token up in the same phase: the bot sends `Authorization: Bearer <ADMIN_TOKEN>`, engines reject
-anything else with 401. The alternative — deleting the token and documenting network isolation as
-the real boundary — is acceptable, but leaving a config field that implies protection it does not
-provide is not.
+That protection is thin for N engines, though. If the multi-game expansion proceeds, this phase
+needs to **introduce a new secret from scratch** — there is no `ADMIN_TOKEN` left to repurpose —
+e.g. `ENGINE_API_TOKEN`, sent as `Authorization: Bearer <token>` by the bot and rejected with 401
+by any engine that doesn't see it. Whether that's worth doing before a second, possibly
+third-party, engine actually exists is an open call; network isolation alone may remain sufficient
+as long as every engine is operator-authored and reviewed (see the v1 non-goal above).
 
 ### Broadcast validation (new attack surface)
 
@@ -496,11 +500,17 @@ user-visible change — which is what makes this safe to do on a live bot.
 - Abandonment semantics per game: draw, forfeit, or resumable save?
 - Should `!list` and `!watch` become game-type-aware, or stay global?
 - Do multiplayer games allow watchers at all in v1, given the airtime cost?
-- Is `ADMIN_TOKEN` wired up, or deleted in favor of documented network isolation?
+- Is a new engine-API token (e.g. `ENGINE_API_TOKEN`) worth introducing before a second engine
+  exists, or does network isolation stay sufficient through v1?
 
 ---
 
 ## Revision history
+
+**Rev 3 (2026-08-30)** — `ADMIN_TOKEN` was removed from the codebase entirely (dead on both sides,
+never wired up; decided against reviving it in favor of documented network isolation). Updated the
+[Security model](#security-model) and the contract's auth line accordingly: any future engine-API
+auth is a new secret introduced from scratch, not a revival of `ADMIN_TOKEN`.
 
 **Rev 2 (2026-08-30)** — implementation review against the current codebase. Changes:
 

@@ -45,10 +45,7 @@ async def run(args: argparse.Namespace) -> None:
     if args.name:
         config.name = args.name
 
-    async with GameClient(
-        config.game_url,
-        admin_token=config.admin_token,
-    ) as game:
+    async with GameClient(config.game_url) as game:
         if args.simulate:
             # In simulate mode we don't have a real meshcore object,
             # so pass a stub that satisfies the advertiser and contact lookup.

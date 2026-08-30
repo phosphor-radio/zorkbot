@@ -40,11 +40,9 @@ class GameClient:
         self,
         base_url: str,
         *,
-        admin_token: str | None = None,
         timeout: float = 60.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.admin_token = admin_token
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
 

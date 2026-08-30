@@ -25,18 +25,18 @@
 |------|---------|
 | `docker-compose.yml` | Production/Pi stack |
 | `docker-compose.dev.yml` | Optional `8080:8080` publish for game |
-| `.env.example` | `ADMIN_TOKEN`, serial device paths |
+| `.env.example` | Serial device paths, session pool overrides |
 | `zorkbot/Dockerfile` | Python 3.13 bot image |
 | `deploy/udev/99-meshcore.rules` | udev symlink template |
 
 ## Verification
 
 ```bash
-cp .env.example .env   # set ADMIN_TOKEN
+cp .env.example .env
 cp /path/to/zork1.z3 games/zork1.z3
 cp zorkbot/zorkbot.toml.example zorkbot/zorkbot.toml
 
-ADMIN_TOKEN=test docker compose config
+docker compose config
 
 # Full build (slow: compiles encrusted; on Pi use serial builds — see README Deploy on a Raspberry Pi)
 docker compose up --build

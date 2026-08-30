@@ -116,7 +116,6 @@ cp .env.example .env
 
 Edit `.env`:
 
-- Set `ADMIN_TOKEN` to a long random secret.
 - Set `MESHCORE_DEVICE` if your radio is not at `/dev/meshcore`.
 
 Edit `zorkbot/zorkbot.toml`:
@@ -326,7 +325,6 @@ You are in a dark forest...
 
 | Variable | Purpose |
 | -------- | ------- |
-| `ADMIN_TOKEN` | Shared secret for game API (required) |
 | `MESHCORE_DEVICE` | Host serial device path (default `/dev/meshcore`) |
 | `MESHCORE_CONTAINER_DEVICE` | Device path inside the container |
 | `MESHCORE_GROUP_GID` | Host `dialout` group GID (default `20`) |
@@ -368,8 +366,6 @@ name = "#zork"
 pubkeys = ["aabbccddeeff"]      # 12-char hex pubkey_prefix of admin users
 ```
 
-`ADMIN_TOKEN` in the environment overrides `admin_token` in TOML. Keep secrets out of git.
-
 ## Admin access
 
 Admin commands are authenticated by **`pubkey_prefix`** — a cryptographic identifier derived from the node's private key that cannot be spoofed. Set `[admin].pubkeys` in `zorkbot.toml` to your 12-char hex pubkey prefix.
@@ -378,8 +374,6 @@ To find your prefix: look up your node's public key in the MeshCore app (Contact
 
 Admin commands:
 - `!end <N>` — force-end any session by number (DM only)
-
-The `ADMIN_TOKEN` HTTP header is retained for direct `game` API calls (e.g. curl from the Pi).
 
 ## Local development
 
@@ -477,12 +471,15 @@ go build -o zorkd ./cmd/zorkd
 ### Compose config
 
 ```bash
-ADMIN_TOKEN=test docker compose config
+docker compose config
 ```
 
 ## Game API
 
-Used by the bot over the Docker network. Not intended for public exposure. `player_id` must be exactly 12 lowercase hex characters (the `pubkey_prefix`).
+Used by the bot over the Docker network. There is no authentication on this API — the only
+protection is network isolation: the `game` service is `expose`d (container-network-only), not
+`ports`-published, so it is unreachable from the host or LAN. Never publish it directly.
+`player_id` must be exactly 12 lowercase hex characters (the `pubkey_prefix`).
 
 | Method | Path | Body / Notes | Purpose |
 | ------ | ---- | ------------ | ------- |
@@ -497,7 +494,6 @@ Used by the bot over the Docker network. Not intended for public exposure. `play
 
 | Symptom | Check |
 | ------- | ----- |
-| `set ADMIN_TOKEN in .env` | Copy `.env.example` to `.env` and set a token |
 | Bot can't open serial | `ls -l $MESHCORE_DEVICE`, udev symlink, `MESHCORE_GROUP_GID` |
 | Game unhealthy | `docker compose logs game`; confirm `games/zork1.z3` exists |
 | Bot ignores channel messages | `[channel].index` in TOML vs actual mesh channel slot |

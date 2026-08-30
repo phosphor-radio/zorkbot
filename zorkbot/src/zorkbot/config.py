@@ -41,7 +41,6 @@ class BotConfig:
     name: str = "zorkbot"
     channel: ChannelConfig = field(default_factory=lambda: ChannelConfig(index=1))
     game_url: str = "http://game:8080"
-    admin_token: str | None = None
     admin: AdminConfig = field(default_factory=AdminConfig)
     log_level: str | None = None
     packet_max_chars: int = 120
@@ -78,8 +77,6 @@ def load_config(path: str | Path | None) -> BotConfig:
 
     if game_url := os.getenv("GAME_URL"):
         config.game_url = game_url
-    if admin_token := os.getenv("ADMIN_TOKEN"):
-        config.admin_token = admin_token
 
     return config
 
@@ -94,8 +91,6 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.name = str(name)
     if game_url := data.get("game_url"):
         config.game_url = str(game_url)
-    if admin_token := data.get("admin_token"):
-        config.admin_token = str(admin_token)
     if log_level := _root_value(data, channel, admin, "log_level"):
         config.log_level = str(log_level)
     if packet_max_chars := _root_value(data, channel, admin, "packet_max_chars"):

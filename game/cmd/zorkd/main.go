@@ -42,8 +42,7 @@ func main() {
 	)
 
 	addr := envOr("LISTEN_ADDR", ":8080")
-	adminToken := os.Getenv("ADMIN_TOKEN")
-	server := api.NewServer(pool, adminToken, logger)
+	server := api.NewServer(pool, logger)
 
 	httpServer := &http.Server{
 		Addr:              addr,

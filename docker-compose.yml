@@ -8,7 +8,6 @@ services:
       - ./data/saves:/data
       - ./games/zork1.z3:/game/zork1.z3:ro
     environment:
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
       MAX_ACTIVE_SESSIONS: ${MAX_ACTIVE_SESSIONS:-8}
       SESSION_IDLE_START_SECONDS: ${SESSION_IDLE_START_SECONDS:-300}
       SESSION_INACTIVITY_SECONDS: ${SESSION_INACTIVITY_SECONDS:-1800}
@@ -39,7 +38,6 @@ services:
       - ${ZORKBOT_CONFIG:-./zorkbot/zorkbot.toml}:/app/zorkbot.toml:ro
     environment:
       GAME_URL: http://game:8080
-      ADMIN_TOKEN: ${ADMIN_TOKEN}
     command:
       - --serial
       - ${MESHCORE_CONTAINER_DEVICE:-/dev/meshcore}

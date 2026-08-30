@@ -12,8 +12,13 @@
 >    and `context.py` `is_admin()`.
 > 2. **Admin commands**: the old `!zork save|restore|reset|quit` admin commands no longer
 >    exist. The only remaining admin command is `!end <N>` (force-end a session by number,
->    DM only). Direct game-service reset is still possible via the HTTP API with
->    `ADMIN_TOKEN`.
+>    DM only).
+> 3. **`ADMIN_TOKEN` was removed entirely**, not retained as this spec's "Retained (service
+>    auth)" section below describes. It was read into both the Go and Python services but
+>    never actually checked or sent anywhere — dead code from day one. The game HTTP API has
+>    no authentication; its only protection is Docker network isolation (`expose:`, not
+>    `ports:`). Everything below describing `ADMIN_TOKEN` / `X-Admin-Token` as bot ↔ `zorkd`
+>    auth is historical intent that was never wired up and has since been deleted.
 >
 > The threat model, authorization algorithm (DM-only, pubkey gating), and config shape
 > (`[admin] pubkeys`) described below are otherwise correct and were implemented as

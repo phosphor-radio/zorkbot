@@ -4,7 +4,6 @@
 
 name = "zorkbot"
 game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for local dev
-# admin_token = "change-me"    # prefer ADMIN_TOKEN env var
 
 # packet_max_chars = 120        # max chars per outgoing radio message
 # log_level = "INFO"

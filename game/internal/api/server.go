@@ -15,19 +15,17 @@ import (
 )
 
 type Server struct {
-	pool       *pty.Pool
-	adminToken string
-	logger     *log.Logger
+	pool   *pty.Pool
+	logger *log.Logger
 }
 
-func NewServer(pool *pty.Pool, adminToken string, logger *log.Logger) *Server {
+func NewServer(pool *pty.Pool, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
 	return &Server{
-		pool:       pool,
-		adminToken: adminToken,
-		logger:     logger,
+		pool:   pool,
+		logger: logger,
 	}
 }
 
@@ -203,8 +201,8 @@ func (s *Server) handleEndSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /sessions/{player_id}/save — reset: wipe save + start fresh.
-// No admin token required — the bot enforces DM-only, own-session restriction
-// at the command level; player_id format validation provides path safety.
+// The bot enforces DM-only, own-session restriction at the command level;
+// player_id format validation provides path safety.
 func (s *Server) handleResetSession(w http.ResponseWriter, r *http.Request) {
 	playerID := r.PathValue("player_id")
 	if err := pty.ValidatePlayerID(playerID); err != nil {

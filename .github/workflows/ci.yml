@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate Compose config
-        run: ADMIN_TOKEN=ci-test docker compose config
+        run: docker compose config
 
   zorkbot:
     runs-on: ubuntu-latest

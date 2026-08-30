@@ -34,7 +34,7 @@ All of the above may be prefixed with `@[zorkbot]` (or `@zorkbot` / `zorkbot`).
 
 ## Admin
 
-**Superseded by** [admin-via-dm.md](admin-via-dm.md): admin commands via DM + `[admin].pubkeys` allowlist. Mesh `admin.names` and `!zork … <token>` are removed by that change. `ADMIN_TOKEN` remains only for bot → `zorkd` HTTP (`X-Admin-Token`).
+**Superseded by** [admin-via-dm.md](admin-via-dm.md): admin commands via DM + `[admin].pubkeys` allowlist. Mesh `admin.names` and `!zork … <token>` are removed by that change. `ADMIN_TOKEN` / `X-Admin-Token` was never actually wired up as bot → `zorkd` HTTP auth (dead code) and has since been removed entirely — see the implementation note in `admin-via-dm.md`.
 
 ## Verification
 
