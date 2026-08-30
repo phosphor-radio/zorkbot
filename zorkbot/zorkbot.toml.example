@@ -3,18 +3,33 @@
 # zorkbot --serial /dev/ttyUSB0 --config zorkbot.toml
 
 name = "zorkbot"
-game_url = "http://game:8080"
-# admin_token = "change-me"  # prefer ADMIN_TOKEN env var
+game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for local dev
+# admin_token = "change-me"    # prefer ADMIN_TOKEN env var
 
-# packet_max_chars = 100
+# packet_max_chars = 120        # max chars per outgoing radio message
 # log_level = "INFO"
 # announce_on_start = false
-# command_queue_size = 8
 # rate_limit_seconds = 3.0
+
+# Session management
+# max_active_sessions = 8           # max concurrent PTY processes
+# max_watchers_per_session = 2      # observers allowed per session
+# session_inactivity_seconds = 1800 # auto-save after 30 min idle
+# session_idle_start_seconds = 300  # release slot if no command in 5 min
+
+# Advertising (send_advert flood=True so players can DM the bot)
+# advert_interval_seconds = 300     # background advert timer
+# advert_cooldown_seconds = 300     # min gap between adverts
+
+# RF send serialization
+# send_spacing_seconds = 2.0        # min gap between radio transmissions
+# max_send_queue_depth = 64         # max queued packets before drops
 
 [channel]
 index = 1
 name = "#zork"
 
 [admin]
-names = ["your-mesh-name"]
+# 12-char hex pubkey_prefix of admin users.
+# Find yours in bot logs: docker compose logs zorkbot | grep player=
+pubkeys = ["your-pubkey-prefix"]
