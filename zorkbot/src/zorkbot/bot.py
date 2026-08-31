@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from zorkbot.addressing import parse_command, strip_address
 from zorkbot.advertiser import Advertiser
@@ -14,6 +15,7 @@ from zorkbot.commands.list_sessions import handle_list
 from zorkbot.commands.reset import handle_reset
 from zorkbot.commands.rules import handle_rules
 from zorkbot.commands.start import AUTHOR_TEXT, HELP_TEXT, handle_start
+from zorkbot.commands.uptime import handle_uptime
 from zorkbot.commands.watch import handle_watch
 from zorkbot.commands.watchers import handle_watchers
 from zorkbot.commands.zork import (
@@ -35,7 +37,8 @@ RATE_LIMIT_REPLY = "Slow down — try again in a moment."
 
 # Commands accepted from the #zork channel (lobby).
 _LOBBY_COMMANDS = frozenset({
-    "help", "commands", "start", "end", "list", "watch", "watchers", "author", "bots",
+    "help", "commands", "start", "end", "list", "watch", "watchers",
+    "author", "uptime", "bots",
 })
 
 
@@ -64,6 +67,8 @@ class ZorkBot:
         # Fire-and-forget tasks (e.g. delayed !bots reply) not tied to a
         # player's command queue, tracked so stop() can cancel them cleanly.
         self._background_tasks: set[asyncio.Task] = set()
+
+        self._started_at = time.monotonic()
 
         # Injected by the runner after construction.
         self._send_dm: ReplyFunc | None = None
@@ -221,8 +226,12 @@ class ZorkBot:
             await ctx.reply_many(packets)
             return
 
-        if command == "author":
+        if command == "author" and not ctx.is_dm:
             await ctx.reply(AUTHOR_TEXT)
+            return
+
+        if command == "uptime" and not ctx.is_dm:
+            await handle_uptime(ctx, time.monotonic() - self._started_at)
             return
 
         if command == "bots":

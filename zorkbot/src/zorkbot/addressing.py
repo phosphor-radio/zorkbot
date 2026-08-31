@@ -8,7 +8,7 @@ from __future__ import annotations
 
 # All recognized bot commands (without the leading !).
 BOT_COMMANDS = frozenset({
-    "help", "commands", "author",
+    "help", "commands", "author", "uptime",
     "start", "end", "list", "watch", "watchers", "reset",
     "rules", "bots",
 })

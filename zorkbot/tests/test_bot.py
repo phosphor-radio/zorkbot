@@ -105,7 +105,9 @@ async def test_author_command() -> None:
 
     async with GameClient("http://game:8080") as game:
         bot = _make_bot(config=config, game=game)
-        await bot.dispatch_dm(_dm_message("!author"), reply)
+        await bot.dispatch_channel(
+            _channel_message("!author", channel_idx=config.channel.index), reply
+        )
         await bot.drain()
 
     assert any("phosphor_radio" in r for r in replies)
@@ -121,15 +123,84 @@ async def test_source_aliases_to_author() -> None:
 
     async with GameClient("http://game:8080") as game:
         bot = _make_bot(config=config, game=game)
-        await bot.dispatch_dm(_dm_message("!source"), reply)
+        await bot.dispatch_channel(
+            _channel_message("!source", channel_idx=config.channel.index), reply
+        )
         await bot.drain()
 
     assert any("phosphor_radio" in r for r in replies)
 
 
+@pytest.mark.asyncio
+async def test_author_not_supported_via_dm() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!author"), reply)
+        await bot.drain()
+
+    assert not any("phosphor_radio" in r for r in replies)
+    assert any("Unknown command" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_uptime_command_on_channel() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_channel(
+            _channel_message("!uptime", channel_idx=config.channel.index), reply
+        )
+        await bot.drain()
+
+    assert any("Uptime" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_uptime_not_supported_via_dm() -> None:
+    config = BotConfig()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!uptime"), reply)
+        await bot.drain()
+
+    assert not any("Uptime" in r for r in replies)
+    assert any("Unknown command" in r for r in replies), f"Got: {replies}"
+
+
 def test_help_text_mentions_author_not_source() -> None:
     assert "!author" in HELP_TEXT
     assert "!source" not in HELP_TEXT
+
+
+def test_help_text_mentions_uptime() -> None:
+    assert "!uptime" in HELP_TEXT
+
+
+def test_dm_help_omits_author_and_uptime() -> None:
+    from zorkbot.commands.zork import _HELP_PACKETS_DM, _HELP_PACKETS_IN_SESSION
+
+    dm_text = "\n".join(_HELP_PACKETS_DM)
+    in_session_text = "\n".join(_HELP_PACKETS_IN_SESSION)
+    assert "!author" not in dm_text
+    assert "!uptime" not in dm_text
+    assert "!author" not in in_session_text
+    assert "!uptime" not in in_session_text
 
 
 @pytest.mark.asyncio

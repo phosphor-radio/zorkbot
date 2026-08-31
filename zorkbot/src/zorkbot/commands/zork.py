@@ -18,17 +18,18 @@ _HELP_PACKET_1 = (
     "!list — active sessions\n!watch <N> — observe a session"
 )
 
-# Channel !help — !reset is DM-only, so it's omitted here.
+# Channel !help — !reset is DM-only, so it's omitted here. !author and
+# !uptime are channel-only, so they're shown here and not in the DM packets.
 _HELP_PACKETS = [
     _HELP_PACKET_1,
-    "!watchers — list all observers\n!author — bot info & source",
+    "!watchers — list all observers\n!author — bot info & source\n!uptime — bot uptime",
 ]
 HELP_TEXT = "\n".join(_HELP_PACKETS)
 
 # DM !help (no active session) — includes !reset since it applies here.
 _HELP_PACKETS_DM = [
     _HELP_PACKET_1,
-    "!watchers — list all observers\n!reset — wipe save & restart\n!author — bot info & source",
+    "!watchers — list all observers\n!reset — wipe save & restart",
 ]
 
 # Shown instead of _HELP_PACKETS_DM for !help from a DM with an active
