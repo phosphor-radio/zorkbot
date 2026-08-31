@@ -132,7 +132,7 @@ or already watching.
 
 | Command | Where | Description |
 |---------|-------|-------------|
-| `!help` / `!commands` | channel or DM | List available commands; adds `!rules` when sent via DM with an active (non-watching) session |
+| `!help` / `!commands` | channel or DM | List available commands; channel version adds `!author`/`!uptime`, DM version adds `!reset` and (with an active, non-watching session) `!rules` |
 | `!start` | channel or DM | Start or restore session; triggers advert |
 | `!end` | channel or DM | Save and end active session, or end a watch |
 | `!end <N>` | DM, admin only | Force-end session N |
@@ -141,7 +141,8 @@ or already watching.
 | `!watchers` | channel or DM | List all watchers and which session they observe |
 | `!reset` | DM only | Wipe save and start a fresh session immediately |
 | `!rules` | DM only | Basic game rules and example commands; requires an active (non-watching) session |
-| `!author` (alias `!source`) | channel or DM | Attribution; `!source` is a hidden alias, not shown in `!help` |
+| `!author` (alias `!source`) | channel only | Attribution; `!source` is a hidden alias, not shown in `!help` |
+| `!uptime` | channel only | Bot process uptime |
 | `!bots` | channel or DM | Mesh bot roll call; replies after a fixed 5s delay so multiple bots don't collide on the air |
 | bare text in DM | DM | If session active: game command. If no session: prompt to `!start` |
 

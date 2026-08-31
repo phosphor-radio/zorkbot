@@ -265,17 +265,18 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 
 ### Lobby (`#zork` channel or DM)
 
-| Command | Who | Action |
-| ------- | --- | ------ |
-| `!help` / `!commands` | Everyone | Command reference (adds `!rules` when sent via DM with an active session) |
-| `!author` (alias `!source`) | Everyone | Author / project links |
-| `!bots` | Everyone | Roll call — replies after a 5s delay, so multiple mesh bots don't collide |
-| `!start` | Everyone | Begin or resume your session |
-| `!end` | Everyone | Save and end your session (or stop watching) |
-| `!list` | Everyone | List active sessions |
-| `!watch <N>` | Everyone | Observe session N via DMs |
-| `!watchers` | Everyone | List all observers and which session they watch |
-| `!end <N>` | Admin | Force-end session N |
+| Command | Where | Who | Action |
+| ------- | ----- | --- | ------ |
+| `!help` / `!commands` | Channel or DM | Everyone | Command reference (channel version adds `!author`/`!uptime`; DM version adds `!reset`, plus `!rules` when sent with an active session) |
+| `!author` (alias `!source`) | Channel only | Everyone | Author / project links |
+| `!uptime` | Channel only | Everyone | Bot process uptime |
+| `!bots` | Channel or DM | Everyone | Roll call — replies after a 5s delay, so multiple mesh bots don't collide |
+| `!start` | Channel or DM | Everyone | Begin or resume your session |
+| `!end` | Channel or DM | Everyone | Save and end your session (or stop watching) |
+| `!list` | Channel or DM | Everyone | List active sessions |
+| `!watch <N>` | Channel or DM | Everyone | Observe session N via DMs |
+| `!watchers` | Channel or DM | Everyone | List all observers and which session they watch |
+| `!end <N>` | Channel or DM | Admin | Force-end session N |
 
 ### In a DM session
 
