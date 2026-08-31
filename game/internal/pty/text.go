@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -58,6 +59,15 @@ func isSaveRestoreCommand(command string) bool {
 	default:
 		return false
 	}
+}
+
+// defaultSaveName derives the save filename from the story file's own name
+// (e.g. "zork1.z3" -> "zork1.sav"), matching the filename encrusted itself
+// suggests as the default at the "Filename [zork1.sav]:" prompt.
+func defaultSaveName(gameFile string) string {
+	base := filepath.Base(gameFile)
+	ext := filepath.Ext(base)
+	return strings.TrimSuffix(base, ext) + ".sav"
 }
 
 func isPromptOnlyLine(line string) bool {

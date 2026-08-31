@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -166,7 +167,15 @@ func newSession(cfg Config) (*Session, error) {
 		return nil, fmt.Errorf("create save dir: %w", err)
 	}
 
-	cmd := exec.Command(cfg.EncrustedPath, cfg.GameFile)
+	// cmd.Dir below is the per-player SaveDir, not this process's cwd, so a
+	// relative GameFile must be resolved to absolute now — otherwise the
+	// spawned encrusted process looks for it relative to SaveDir instead.
+	gameFile, err := filepath.Abs(cfg.GameFile)
+	if err != nil {
+		return nil, fmt.Errorf("resolve game file path: %w", err)
+	}
+
+	cmd := exec.Command(cfg.EncrustedPath, gameFile)
 	cmd.Dir = cfg.SaveDir
 
 	ptmx, err := pty.Start(cmd)
@@ -247,7 +256,13 @@ func (s *Session) commandWithFilenamePrompt(ctx context.Context, command string)
 	if _, err := s.readUntilAndDrain(ctx, hasFilenamePrompt); err != nil {
 		return "", err
 	}
-	if _, err := fmt.Fprintf(s.ptmx, "\n"); err != nil {
+	// Accepting the blank/default filename resolves relative to the story
+	// file's own directory, not the process's cwd (SaveDir) — so an accepted
+	// default silently collides across every player sharing that game file.
+	// Sending an explicit path keeps each player's save inside their own
+	// SaveDir, where dirHasSaveFile() looks for it on the next !start.
+	savePath := filepath.Join(s.cfg.SaveDir, defaultSaveName(s.cfg.GameFile))
+	if _, err := fmt.Fprintf(s.ptmx, "%s\n", savePath); err != nil {
 		return "", fmt.Errorf("write filename: %w", err)
 	}
 

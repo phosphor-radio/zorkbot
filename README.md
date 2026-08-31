@@ -10,7 +10,7 @@ MeshCore radio bot for personal sessions of Zork I. Each player gets their own p
 
 ### How to play
 
-1. On `#zork`, send `!start` — the bot sends a DM confirming your session.
+1. On `#zork`, send `!start` — the bot DMs you a confirmation and immediately follows up with a `look` at your current room, so you know where you are without typing anything.
 2. From that point, **DM the bot** with game commands directly (no prefix needed).
 3. Send `!end` to save your game; `!start` again later to resume it.
 
@@ -271,7 +271,7 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 | `!author` (alias `!source`) | Channel only | Everyone | Author / project links |
 | `!uptime` | Channel only | Everyone | Bot process uptime |
 | `!bots` | Channel or DM | Everyone | Roll call — replies after a 5s delay, so multiple mesh bots don't collide |
-| `!start` | Channel or DM | Everyone | Begin or resume your session |
+| `!start` | Channel or DM | Everyone | Begin or resume your session (DM gets an intro plus an immediate `look` at your room) |
 | `!end` | Channel or DM | Everyone | Save and end your session (or stop watching) |
 | `!list` | Channel or DM | Everyone | List active sessions |
 | `!watch <N>` | Channel or DM | Everyone | Observe session N via DMs |
@@ -283,9 +283,9 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 | Input | Action |
 | ----- | ------ |
 | `look`, `go north`, `take lamp`, … | Game command (any bare text) |
-| `!start` | Begin or resume your session |
+| `!start` | Begin or resume your session (followed by an immediate `look` at your room) |
 | `!end` | Save and end your session |
-| `!reset` | Wipe save file and start fresh immediately |
+| `!reset` | Wipe save file and start fresh immediately (also followed by a `look`) |
 | `!rules` | Basic rules and example commands for the game (requires an active, non-watching session) |
 
 ### Session lifecycle

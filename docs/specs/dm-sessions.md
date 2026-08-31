@@ -133,13 +133,13 @@ or already watching.
 | Command | Where | Description |
 |---------|-------|-------------|
 | `!help` / `!commands` | channel or DM | List available commands; channel version adds `!author`/`!uptime`, DM version adds `!reset` and (with an active, non-watching session) `!rules` |
-| `!start` | channel or DM | Start or restore session; triggers advert |
+| `!start` | channel or DM | Start or restore session; triggers advert; DM gets an intro plus an immediate `look` at the current room |
 | `!end` | channel or DM | Save and end active session, or end a watch |
 | `!end <N>` | DM, admin only | Force-end session N |
 | `!list` | channel or DM | List active sessions: `#1 Alice (5m) #2 Bob (12m)` |
 | `!watch <N>` | channel or DM | Observe session N via DMs |
 | `!watchers` | channel or DM | List all watchers and which session they observe |
-| `!reset` | DM only | Wipe save and start a fresh session immediately |
+| `!reset` | DM only | Wipe save and start a fresh session immediately, followed by an immediate `look` |
 | `!rules` | DM only | Basic game rules and example commands; requires an active (non-watching) session |
 | `!author` (alias `!source`) | channel only | Attribution; `!source` is a hidden alias, not shown in `!help` |
 | `!uptime` | channel only | Bot process uptime |
@@ -199,9 +199,17 @@ Timers (per active session):
 
 ### Save files
 
-Encrusted writes to its working directory (`/data/<playerID>/`) when given a blank response to the
-`Filename:` prompt. The pool checks for any `*.sav` file in the directory to detect a prior save.
+Encrusted resolves a *blank* response to the `Filename:` prompt against the story file's own
+directory, not the process's cwd — so `pty.Session` always sends an explicit path,
+`<SaveDir>/<gamefile-basename>.sav`, keeping each player's save inside their own
+`/data/<playerID>/`. The pool checks for any `*.sav` file in that directory to detect a prior save.
 On reset all files in the directory are deleted.
+
+The story file path itself must also be absolute for the same reason: `cmd.Dir` for the spawned
+encrusted process is the per-player `SaveDir`, so a relative `GameFile` would resolve against that
+instead of wherever `zorkd` was launched from. `pty.newSession` resolves it via `filepath.Abs`
+before spawning, so a relative `GAME_FILE` (as used by the "direct zorkd run" dev instructions in
+the README) still works.
 
 ---
 
