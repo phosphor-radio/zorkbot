@@ -18,6 +18,7 @@ from zorkbot.commands.watch import handle_watch
 from zorkbot.commands.watchers import handle_watchers
 from zorkbot.commands.zork import (
     _HELP_PACKETS,
+    _HELP_PACKETS_DM,
     _HELP_PACKETS_IN_SESSION,
     handle_game_command,
 )
@@ -211,7 +212,13 @@ class ZorkBot:
                 ctx.is_dm
                 and self._state.active_state(ctx.pubkey_prefix or "") == "playing"
             )
-            await ctx.reply_many(_HELP_PACKETS_IN_SESSION if in_session else _HELP_PACKETS)
+            if in_session:
+                packets = _HELP_PACKETS_IN_SESSION
+            elif ctx.is_dm:
+                packets = _HELP_PACKETS_DM
+            else:
+                packets = _HELP_PACKETS
+            await ctx.reply_many(packets)
             return
 
         if command == "author":
