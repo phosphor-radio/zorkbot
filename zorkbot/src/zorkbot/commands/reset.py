@@ -19,7 +19,7 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
 
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you.")
+        await ctx.reply("Cannot identify you — please send an Advert.")
         return
 
     # Remove any existing session from state (no end_session call; reset handles it).

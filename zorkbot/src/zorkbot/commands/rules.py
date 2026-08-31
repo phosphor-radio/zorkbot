@@ -24,7 +24,7 @@ async def handle_rules(ctx: Context, state: SessionState) -> None:
 
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you.")
+        await ctx.reply("Cannot identify you — please send an Advert.")
         return
 
     if state.active_state(player_id) != "playing":

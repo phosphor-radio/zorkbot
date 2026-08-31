@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 async def handle_watch(ctx: Context, state: SessionState, args: str) -> None:
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you.")
+        await ctx.reply("Cannot identify you — please send an Advert.")
         return
 
     # Parse session number.

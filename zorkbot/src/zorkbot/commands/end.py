@@ -24,7 +24,7 @@ async def handle_end(
 ) -> None:
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you.")
+        await ctx.reply("Cannot identify you — please send an Advert.")
         return
 
     # Admin force-end: !end <N>

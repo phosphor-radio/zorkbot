@@ -82,7 +82,7 @@ async def handle_game_command(
     """Process a bare game command from a DM session."""
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you.")
+        await ctx.reply("Cannot identify you — please send an Advert.")
         return
 
     record = state.get_session(player_id)

@@ -24,7 +24,7 @@ async def handle_start(
 ) -> None:
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you — please DM me directly.")
+        await ctx.reply("Cannot identify you — please send an Advert.")
         return
 
     # Check one-active-state-per-player rule.
