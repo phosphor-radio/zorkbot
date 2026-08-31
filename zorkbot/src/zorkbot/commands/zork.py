@@ -44,6 +44,34 @@ Discord: @phosphor_radio
 Source: https://github.com/phosphor-radio/zorkbot"""
 
 
+async def send_initial_look(
+    ctx: Context,
+    game: GameClient,
+    player_id: str,
+    send_dm_func=None,   # async (pubkey_prefix, text) -> None, required if not ctx.is_dm
+) -> None:
+    """Silently issue a `look` after !start/!reset and forward the room
+    description to the player's DM, so they immediately see where they are."""
+    try:
+        result = await game.command(player_id, "look")
+    except (GameServiceError, SessionNotFoundError):
+        logger.warning("initial look failed player=%s", player_id)
+        return
+
+    if not result.ok:
+        return
+
+    packets = packetize(result.output, max_chars=ctx.config.packet_max_chars)
+    if not packets:
+        return
+
+    if ctx.is_dm:
+        await ctx.reply_many(packets)
+    else:
+        for packet in packets:
+            await send_dm_func(player_id, packet)
+
+
 async def handle_game_command(
     ctx: Context,
     game: GameClient,

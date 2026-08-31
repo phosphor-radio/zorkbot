@@ -387,6 +387,88 @@ async def test_start_session_via_dm() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_start_sends_initial_look_via_dm() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House.\n"})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+
+    assert any("Session #1" in r for r in replies), f"Got: {replies}"
+    assert any("West of House" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_start_sends_initial_look_via_channel_dm() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House.\n"})
+    )
+    channel_replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        channel_replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_channel(
+            _channel_message("!start", channel_idx=config.channel.index), reply
+        )
+        await bot.drain()
+        dm_texts = [call.args[1] for call in bot._send_dm.await_args_list]
+
+    assert any("Session #1" in r for r in channel_replies), f"Got: {channel_replies}"
+    assert any("West of House" in t for t in dm_texts), f"Got: {dm_texts}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_reset_sends_initial_look() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}/save").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House.\n"})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        replies.clear()
+
+        await bot.dispatch_dm(_dm_message("!reset"), reply)
+        await bot.drain()
+
+    assert any("started fresh" in r for r in replies), f"Got: {replies}"
+    assert any("West of House" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_game_command_in_dm() -> None:
     config = BotConfig(rate_limit_seconds=0.0)  # disable rate limiting in tests
     respx.post("http://game:8080/sessions").mock(

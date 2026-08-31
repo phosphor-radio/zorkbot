@@ -11,7 +11,7 @@ from zorkbot.session_state import SessionState
 logger = logging.getLogger(__name__)
 
 # Re-exported for bot.py — both start.py and zork.py share these constants.
-from zorkbot.commands.zork import AUTHOR_TEXT, HELP_TEXT  # noqa: E402,F401
+from zorkbot.commands.zork import AUTHOR_TEXT, HELP_TEXT, send_initial_look  # noqa: E402,F401
 
 
 async def handle_start(
@@ -79,3 +79,5 @@ async def handle_start(
         # Acknowledge on channel, send intro via DM.
         await ctx.reply(f"Session #{record.num} started for {player_name} — check your DMs!")
         await send_dm_func(player_id, intro)
+
+    await send_initial_look(ctx, game, player_id, send_dm_func)

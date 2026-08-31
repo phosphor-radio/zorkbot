@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from zorkbot.commands.zork import send_initial_look
 from zorkbot.context import Context
 from zorkbot.game_client import GameClient, GameServiceError, SessionFullError
 from zorkbot.session_state import SessionState
@@ -44,3 +45,4 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
     await ctx.reply(
         f"Game reset. Session #{new_record.num} started fresh."
     )
+    await send_initial_look(ctx, game, player_id)
