@@ -49,7 +49,7 @@ async def handle_end(
         except (GameServiceError, SessionNotFoundError) as exc:
             logger.warning("end_session failed for player=%s: %s", player_id, exc)
         logger.info("session=%s ended by player=%s", num, player_id)
-        await ctx.reply(f"Session #{num} saved and ended.")
+        await ctx.reply(f"Zork I Session #{num} saved and ended.")
         return
 
     await ctx.reply("You don't have an active session or watch to end.")
@@ -73,7 +73,7 @@ async def _handle_admin_end(
 
     record = state.get_session_by_num(session_num)
     if record is None:
-        await ctx.reply(f"Session #{session_num} is not active.")
+        await ctx.reply(f"Zork I Session #{session_num} is not active.")
         return
 
     target_id = record.player_id
@@ -86,4 +86,4 @@ async def _handle_admin_end(
     logger.info(
         "session=%d force-ended by admin=%s", session_num, ctx.pubkey_prefix
     )
-    await ctx.reply(f"Session #{session_num} ({record.player_name}) has been ended.")
+    await ctx.reply(f"Zork I Session #{session_num} ({record.player_name}) has been ended.")

@@ -71,13 +71,15 @@ async def handle_start(
     )
 
     intro = (
-        f"Session #{record.num} started. Type your commands here in DM!"
+        f"Zork I Session #{record.num} started. Type your commands here in DM!"
     )
     if ctx.is_dm:
         await ctx.reply(intro)
     else:
         # Acknowledge on channel, send intro via DM.
-        await ctx.reply(f"Session #{record.num} started for {player_name} — check your DMs!")
+        await ctx.reply(
+            f"Zork I Session #{record.num} started for {player_name} — check your DMs!"
+        )
         await send_dm_func(player_id, intro)
 
     await send_initial_look(ctx, game, player_id, send_dm_func)

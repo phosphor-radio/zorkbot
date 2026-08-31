@@ -96,9 +96,9 @@ class SessionState:
         """
         record = self.get_session_by_num(session_num)
         if record is None:
-            return f"Session #{session_num} is not active."
+            return f"Zork I Session #{session_num} is not active."
         if len(record.watchers) >= self._max_watchers:
-            return f"Session #{session_num} already has the maximum number of watchers."
+            return f"Zork I Session #{session_num} already has the maximum number of watchers."
         record.watchers.add(watcher_id)
         self._watching[watcher_id] = session_num
         return None

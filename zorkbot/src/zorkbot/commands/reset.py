@@ -43,6 +43,6 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
         player_id, old_num, new_record.num,
     )
     await ctx.reply(
-        f"Game reset. Session #{new_record.num} started fresh."
+        f"Game reset. Zork I Session #{new_record.num} started fresh."
     )
     await send_initial_look(ctx, game, player_id)
