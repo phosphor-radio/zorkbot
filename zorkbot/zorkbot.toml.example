@@ -25,6 +25,13 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 # send_spacing_seconds = 2.0        # min gap between radio transmissions
 # max_send_queue_depth = 64         # max queued packets before drops
 
+# Mesh bot discovery (!bots roll call) — a separate channel from the game
+# lobby below. Disabled by default; requires both of these to be set.
+# bots_enabled = false
+# [bots_channel]
+# index = 2
+# name = "#bots"
+
 [channel]
 index = 1
 name = "#zork"

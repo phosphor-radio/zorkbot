@@ -91,7 +91,11 @@ class Simulator:
             await self.bot.dispatch_dm(message, reply)
         else:
             message = self._channel_message(line)
-            await self.bot.dispatch_channel(message, reply)
+            bots_channel = self.bot.config.bots_channel
+            if bots_channel is not None and self.channel_idx == bots_channel.index:
+                await self.bot.dispatch_bots_channel(message, reply)
+            else:
+                await self.bot.dispatch_channel(message, reply)
 
         await self.bot.drain()
 

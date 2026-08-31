@@ -143,7 +143,7 @@ or already watching.
 | `!rules` | DM only | Basic game rules and example commands; requires an active (non-watching) session |
 | `!author` (alias `!source`) | channel only | Attribution; `!source` is a hidden alias, not shown in `!help` |
 | `!uptime` | channel only | Bot process uptime |
-| `!bots` | channel or DM | Mesh bot roll call; replies after a fixed 5s delay so multiple bots don't collide on the air |
+| `!bots` | dedicated bots channel only | Mesh bot roll call; replies after a 5–10s randomized delay so multiple bots don't collide on the air. Gated behind `bots_enabled` (default off) and a configured `[bots_channel]` — separate from the game channel, and not reachable via DM or `#zork` |
 | bare text in DM | DM | If session active: game command. If no session: prompt to `!start` |
 
 ### `!start` on channel
@@ -276,6 +276,8 @@ dropped with a warning log.
 | `advert_cooldown_seconds` | 300 | Min time between any two adverts |
 | `send_spacing_seconds` | 2.0 | Minimum gap between RF transmissions |
 | `max_send_queue_depth` | 64 | Max queued packets before overflow drops |
+| `bots_enabled` | false | Enable `!bots` roll-call handling; requires `[bots_channel]` too |
+| `[bots_channel] index` / `name` | none | Dedicated channel `!bots` listens on — separate from `[channel]` |
 | `[admin] pubkeys` | [] | Pubkey prefixes (12 hex chars) of admin users |
 
 The PTY pool cap and idle/inactivity timeouts (described above, in "RF Send Serialization" and the
@@ -290,8 +292,9 @@ never enforces a pool cap or session timeout.
 
 - **Session state is in-memory**: watcher lists and session numbers are lost on bot restart. Players
   keep their saves (files on disk) but must re-issue `!start` after a restart.
-- **save filename is encrusted-defined**: the exact `*.sav` filename is whatever encrusted chooses
-  when given a blank response; it is not configurable.
+- **save filename is derived from the game file**: `pty.Session` sends an explicit
+  `<SaveDir>/<gamefile-basename>.sav` path at encrusted's filename prompt (see "Save files" above)
+  rather than a player-chosen name; it is not configurable per-player.
 - **No mid-game isolation from PTY restarts**: if a PTY crashes and is restarted by the pool, the
   player's unsaved progress is lost. The inactivity auto-save mitigates this.
 - **DM delivery not guaranteed**: `send_msg` fires and returns on firmware acceptance, not ACK.

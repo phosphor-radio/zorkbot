@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from meshcore.events import Event, EventType
 
+from zorkbot.channels import ChannelConfig
 from zorkbot.config import BotConfig
 from zorkbot.runner import apply_settings, MeshCoreRunner
 
@@ -27,7 +28,10 @@ def _make_runner(meshcore):
     bot = MagicMock()
     bot.config.channel.index = 1
     bot.config.announce_on_start = False
+    bot.config.bots_enabled = False
+    bot.config.bots_channel = None
     bot.dispatch_channel = AsyncMock()
+    bot.dispatch_bots_channel = AsyncMock()
     bot.advertiser = MagicMock()
     return MeshCoreRunner(bot, meshcore)
 
@@ -135,3 +139,54 @@ async def test_start_enables_live_contact_updates():
 
     assert meshcore.auto_update_contacts is True
     meshcore.ensure_contacts.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_does_not_subscribe_bots_channel_when_disabled():
+    meshcore = _make_meshcore()
+    runner = _make_runner(meshcore)
+
+    await runner.start()
+
+    assert runner._bots_channel_sub is None
+
+
+@pytest.mark.asyncio
+async def test_start_subscribes_bots_channel_when_enabled():
+    meshcore = _make_meshcore()
+    runner = _make_runner(meshcore)
+    runner.bot.config.bots_enabled = True
+    runner.bot.config.bots_channel = ChannelConfig(index=3, name="#bots")
+
+    await runner.start()
+
+    assert runner._bots_channel_sub is not None
+    event = Event(
+        EventType.CHANNEL_MSG_RECV,
+        {"channel_idx": 3, "text": "Stranger: !bots"},
+    )
+    await runner._on_bots_channel_msg(event)
+    message = runner.bot.dispatch_bots_channel.call_args[0][0]
+    assert message.text == "!bots"
+    assert message.channel_idx == 3
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_configures_bots_channel_when_enabled():
+    meshcore = _make_settings_meshcore(current_autoadd_config=0x01)
+    config = BotConfig()
+    config.bots_enabled = True
+    config.bots_channel = ChannelConfig(index=3, name="#bots")
+
+    await apply_settings(meshcore, config)
+
+    meshcore.commands.set_channel.assert_any_await(3, "#bots", None)
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_skips_bots_channel_when_disabled():
+    meshcore = _make_settings_meshcore(current_autoadd_config=0x01)
+
+    await apply_settings(meshcore, BotConfig())
+
+    meshcore.commands.set_channel.assert_awaited_once()

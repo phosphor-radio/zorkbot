@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ZORK_CHANNEL_NAME = "#zork"
+BOTS_CHANNEL_NAME = "#bots"
 
 
 @dataclass(frozen=True)
@@ -18,5 +19,5 @@ class ChannelConfig:
     secret: bytes | None = None
 
 
-def is_zork_channel(channel_idx: int, zork_channel: ChannelConfig) -> bool:
-    return channel_idx == zork_channel.index
+def channel_matches(channel_idx: int, channel: ChannelConfig) -> bool:
+    return channel_idx == channel.index

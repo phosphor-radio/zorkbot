@@ -270,13 +270,23 @@ On `#zork`, no bot mention is required. You may also prefix any command with `@[
 | `!help` / `!commands` | Channel or DM | Everyone | Command reference (channel version adds `!author`/`!uptime`; DM version adds `!reset`, plus `!rules` when sent with an active session) |
 | `!author` (alias `!source`) | Channel only | Everyone | Author / project links |
 | `!uptime` | Channel only | Everyone | Bot process uptime |
-| `!bots` | Channel or DM | Everyone | Roll call — replies after a 5s delay, so multiple mesh bots don't collide |
 | `!start` | Channel or DM | Everyone | Begin or resume your session (DM gets an intro plus an immediate `look` at your room) |
 | `!end` | Channel or DM | Everyone | Save and end your session (or stop watching) |
 | `!list` | Channel or DM | Everyone | List active sessions |
 | `!watch <N>` | Channel or DM | Everyone | Observe session N via DMs |
 | `!watchers` | Channel or DM | Everyone | List all observers and which session they watch |
 | `!end <N>` | Channel or DM | Admin | Force-end session N |
+
+### Bots-discovery channel
+
+`!bots` is a mesh-wide roll-call convention some bots answer so other operators can discover
+what's running. It's **not** part of the `#zork` lobby: it only works on a separate,
+dedicated channel, configured via `[bots_channel]` and gated behind `bots_enabled` (default:
+disabled — see [Configuration](#configuration)). It doesn't work via DM or on `#zork`.
+
+When enabled, `!bots` on the configured channel replies after a 5–10s randomized delay (so
+multiple mesh bots answering the same roll-call don't collide on the air) with a short blurb
+identifying the bot and pointing to the game channel and `!help`.
 
 ### In a DM session
 
@@ -351,6 +361,14 @@ advert_cooldown_seconds = 300   # min gap between adverts
 # RF send serialization
 send_spacing_seconds = 2.0      # min gap between radio transmissions
 max_send_queue_depth = 64       # max queued packets before drops
+
+# Mesh bot discovery (!bots roll call) — a separate channel from the game
+# lobby below. Disabled by default; requires both bots_enabled and
+# [bots_channel] to be set.
+bots_enabled = false
+[bots_channel]
+index = 2
+name = "#bots"
 
 [channel]
 index = 1

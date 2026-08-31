@@ -66,6 +66,15 @@ async def apply_settings(meshcore: MeshCore, config: BotConfig) -> None:
     )
     _log_apply(f"channel {channel.index} name={channel.name!r}", result)
 
+    if config.bots_enabled and config.bots_channel is not None:
+        bots_channel = config.bots_channel
+        result = await meshcore.commands.set_channel(
+            bots_channel.index,
+            bots_channel.name,
+            bots_channel.secret,
+        )
+        _log_apply(f"channel {bots_channel.index} name={bots_channel.name!r}", result)
+
     await _ensure_contacts_overwrite_oldest(meshcore)
 
 
@@ -96,6 +105,7 @@ class MeshCoreRunner:
         self.bot = bot
         self.meshcore = meshcore
         self._channel_sub: Any | None = None
+        self._bots_channel_sub: Any | None = None
         self._dm_sub: Any | None = None
         # Unified send lock: all RF transmissions (channel + DM) serialized here.
         self._send_lock = asyncio.Lock()
@@ -122,6 +132,20 @@ class MeshCoreRunner:
             self._on_channel_msg,
             attribute_filters={"channel_idx": self.bot.config.channel.index},
         )
+
+        bots_channel = self.bot.config.bots_channel
+        if self.bot.config.bots_enabled and bots_channel is not None:
+            self._bots_channel_sub = self.meshcore.subscribe(
+                EventType.CHANNEL_MSG_RECV,
+                self._on_bots_channel_msg,
+                attribute_filters={"channel_idx": bots_channel.index},
+            )
+            logger.info(
+                "listening for !bots on channel %d (%s)",
+                bots_channel.index,
+                bots_channel.name,
+            )
+
         self._dm_sub = self.meshcore.subscribe(
             EventType.CONTACT_MSG_RECV,
             self._on_dm_msg,
@@ -150,6 +174,9 @@ class MeshCoreRunner:
         if self._channel_sub is not None:
             self.meshcore.unsubscribe(self._channel_sub)
             self._channel_sub = None
+        if self._bots_channel_sub is not None:
+            self.meshcore.unsubscribe(self._bots_channel_sub)
+            self._bots_channel_sub = None
         if self._dm_sub is not None:
             self.meshcore.unsubscribe(self._dm_sub)
             self._dm_sub = None
@@ -169,8 +196,7 @@ class MeshCoreRunner:
     # Incoming message handlers
     # ------------------------------------------------------------------
 
-    async def _on_channel_msg(self, event: Event) -> None:
-        payload = event.payload
+    def _build_channel_message(self, payload: dict) -> IncomingMessage:
         channel_idx = payload.get("channel_idx", 0)
         raw_text = payload.get("text", "")
         # CHANNEL_MSG_RECV packets carry no sender key material — group-channel
@@ -202,7 +228,7 @@ class MeshCoreRunner:
             if contact:
                 sender_name = contact.get("adv_name", pubkey_prefix[:8])
 
-        message = IncomingMessage(
+        return IncomingMessage(
             text=text,
             sender_name=sender_name,
             pubkey_prefix=pubkey_prefix,
@@ -210,17 +236,34 @@ class MeshCoreRunner:
             channel_idx=channel_idx,
             raw=payload,
         )
+
+    async def _on_channel_msg(self, event: Event) -> None:
+        message = self._build_channel_message(event.payload)
         logger.info(
             "channel %d msg player=%s: %r",
-            channel_idx,
-            (pubkey_prefix or "?")[:8],
-            text,
+            message.channel_idx,
+            (message.pubkey_prefix or "?")[:8],
+            message.text,
         )
 
         async def reply(text: str) -> None:
-            await self._send_chan_msg(channel_idx, text)
+            await self._send_chan_msg(message.channel_idx, text)
 
         await self.bot.dispatch_channel(message, reply)
+
+    async def _on_bots_channel_msg(self, event: Event) -> None:
+        message = self._build_channel_message(event.payload)
+        logger.info(
+            "bots-channel %d msg player=%s: %r",
+            message.channel_idx,
+            (message.pubkey_prefix or "?")[:8],
+            message.text,
+        )
+
+        async def reply(text: str) -> None:
+            await self._send_chan_msg(message.channel_idx, text)
+
+        await self.bot.dispatch_bots_channel(message, reply)
 
     async def _on_dm_msg(self, event: Event) -> None:
         payload = event.payload

@@ -11,7 +11,8 @@ import httpx
 
 from zorkbot.advertiser import Advertiser
 from zorkbot.bot import HELP_TEXT, ZorkBot
-from zorkbot.commands.bots import REPLY_DELAY_SECONDS, REPLY_TEXT
+from zorkbot.channels import ChannelConfig
+from zorkbot.commands.bots import build_reply_text
 from zorkbot.commands.rules import RULES_TEXT
 from zorkbot.config import AdminConfig, BotConfig
 from zorkbot.context import IncomingMessage
@@ -203,9 +204,16 @@ def test_dm_help_omits_author_and_uptime() -> None:
     assert "!uptime" not in in_session_text
 
 
-@pytest.mark.asyncio
-async def test_bots_command_replies_after_delay() -> None:
+def _bots_enabled_config(bots_index: int = 2) -> BotConfig:
     config = BotConfig()
+    config.bots_enabled = True
+    config.bots_channel = ChannelConfig(index=bots_index, name="#bots")
+    return config
+
+
+@pytest.mark.asyncio
+async def test_bots_command_on_bots_channel() -> None:
+    config = _bots_enabled_config()
     replies: list[str] = []
 
     async def reply(text: str) -> None:
@@ -214,35 +222,89 @@ async def test_bots_command_replies_after_delay() -> None:
     with patch("zorkbot.commands.bots.asyncio.sleep", new=AsyncMock()) as mock_sleep:
         async with GameClient("http://game:8080") as game:
             bot = _make_bot(config=config, game=game)
-            await bot.dispatch_dm(_dm_message("!bots"), reply)
-            await bot.drain()
-            # !bots replies via a fire-and-forget background task, not the
-            # player's own command queue — drain() doesn't wait for it.
+            await bot.dispatch_bots_channel(
+                _channel_message("!bots", channel_idx=config.bots_channel.index),
+                reply,
+            )
+            # !bots replies via a fire-and-forget background task.
             await asyncio.gather(*bot._background_tasks)
 
-    mock_sleep.assert_awaited_once_with(REPLY_DELAY_SECONDS)
-    assert replies == [REPLY_TEXT]
+    mock_sleep.assert_awaited_once()
+    delay = mock_sleep.await_args.args[0]
+    assert 5.0 <= delay <= 10.0
+    assert replies == [build_reply_text(config.channel.name)]
 
 
 @pytest.mark.asyncio
-async def test_bots_command_on_channel() -> None:
-    config = BotConfig()
+async def test_bots_command_ignored_when_disabled() -> None:
+    config = BotConfig()  # bots_enabled=False by default
+    config.bots_channel = ChannelConfig(index=2, name="#bots")
     replies: list[str] = []
 
     async def reply(text: str) -> None:
         replies.append(text)
 
-    with patch("zorkbot.commands.bots.asyncio.sleep", new=AsyncMock()):
-        async with GameClient("http://game:8080") as game:
-            bot = _make_bot(config=config, game=game)
-            await bot.dispatch_channel(
-                _channel_message("!bots", channel_idx=config.channel.index),
-                reply,
-            )
-            await bot.drain()
-            await asyncio.gather(*bot._background_tasks)
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_bots_channel(
+            _channel_message("!bots", channel_idx=2), reply
+        )
 
-    assert replies == [REPLY_TEXT]
+    assert replies == []
+    assert not bot._background_tasks
+
+
+@pytest.mark.asyncio
+async def test_bots_command_ignored_on_wrong_channel() -> None:
+    config = _bots_enabled_config(bots_index=2)
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        # Message arrives on a different channel than config.bots_channel.
+        await bot.dispatch_bots_channel(
+            _channel_message("!bots", channel_idx=99), reply
+        )
+
+    assert replies == []
+    assert not bot._background_tasks
+
+
+@pytest.mark.asyncio
+async def test_bots_command_not_supported_via_dm() -> None:
+    config = _bots_enabled_config()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!bots"), reply)
+        await bot.drain()
+
+    assert any("Unknown command" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_bots_command_not_supported_on_zork_channel() -> None:
+    config = _bots_enabled_config()
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_channel(
+            _channel_message("!bots", channel_idx=config.channel.index), reply
+        )
+        await bot.drain()
+
+    assert replies == ["Send !start and then DM me to play."]
 
 
 @pytest.mark.asyncio

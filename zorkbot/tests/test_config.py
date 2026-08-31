@@ -89,3 +89,40 @@ packet_max_chars = 120
     config = load_config(config_path)
     assert config.announce_on_start is False
     assert config.packet_max_chars == 120
+
+
+def test_bots_channel_disabled_by_default() -> None:
+    config = load_config(None)
+    assert config.bots_enabled is False
+    assert config.bots_channel is None
+
+
+def test_bots_channel_from_toml(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text(
+        """
+bots_enabled = true
+
+[bots_channel]
+index = 3
+name = "#bots"
+""".strip()
+    )
+    config = load_config(config_path)
+    assert config.bots_enabled is True
+    assert config.bots_channel.index == 3
+    assert config.bots_channel.name == "#bots"
+
+
+def test_bots_channel_configured_but_disabled(tmp_path: Path) -> None:
+    """A [bots_channel] section alone doesn't turn the feature on."""
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text(
+        """
+[bots_channel]
+index = 3
+""".strip()
+    )
+    config = load_config(config_path)
+    assert config.bots_enabled is False
+    assert config.bots_channel.index == 3

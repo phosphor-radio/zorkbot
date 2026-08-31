@@ -8,7 +8,7 @@ import time
 
 from zorkbot.addressing import parse_command, strip_address
 from zorkbot.advertiser import Advertiser
-from zorkbot.channels import is_zork_channel
+from zorkbot.channels import channel_matches
 from zorkbot.commands.bots import handle_bots
 from zorkbot.commands.end import handle_end
 from zorkbot.commands.list_sessions import handle_list
@@ -35,10 +35,11 @@ logger = logging.getLogger(__name__)
 BUSY_REPLY = "The bot is busy, try again."
 RATE_LIMIT_REPLY = "Slow down — try again in a moment."
 
-# Commands accepted from the #zork channel (lobby).
+# Commands accepted from the #zork channel (lobby). !bots is deliberately
+# excluded — it's only reachable from the separate bots-discovery channel.
 _LOBBY_COMMANDS = frozenset({
     "help", "commands", "start", "end", "list", "watch", "watchers",
-    "author", "uptime", "bots",
+    "author", "uptime",
 })
 
 
@@ -82,7 +83,7 @@ class ZorkBot:
 
     async def dispatch_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
         """Handle a message from the #zork channel."""
-        if not is_zork_channel(message.channel_idx, self.config.channel):
+        if not channel_matches(message.channel_idx, self.config.channel):
             logger.debug("ignoring message on channel %s", message.channel_idx)
             return
 
@@ -109,6 +110,38 @@ class ZorkBot:
             config=self.config,
         )
         await self._enqueue(ctx, command, rest_args, reply)
+
+    async def dispatch_bots_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
+        """Handle a message from the dedicated bots-discovery channel.
+
+        Only !bots is recognized here — everything else is ignored, since
+        this channel is for mesh bot roll-calls, not the game lobby. Inert
+        unless bots_enabled and a [bots_channel] are both configured.
+        """
+        if not self.config.bots_enabled or self.config.bots_channel is None:
+            return
+        if not channel_matches(message.channel_idx, self.config.bots_channel):
+            return
+
+        rest, _mentioned = strip_address(message.text.strip(), self.name)
+        args = parse_command(rest)
+        if args is None:
+            return
+
+        command, _, _rest_args = args.partition(" ")
+        if command.lower() != "bots":
+            return
+
+        if not await self._rate_check(message, reply):
+            return
+
+        ctx = Context(
+            message=message,
+            args=args,
+            _reply=reply,
+            config=self.config,
+        )
+        self._spawn(handle_bots(ctx))
 
     async def dispatch_dm(self, message: IncomingMessage, reply: ReplyFunc) -> None:
         """Handle a direct message."""
@@ -232,10 +265,6 @@ class ZorkBot:
 
         if command == "uptime" and not ctx.is_dm:
             await handle_uptime(ctx, time.monotonic() - self._started_at)
-            return
-
-        if command == "bots":
-            self._spawn(handle_bots(ctx))
             return
 
         if command == "rules":

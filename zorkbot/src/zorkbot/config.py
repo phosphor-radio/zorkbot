@@ -8,7 +8,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from zorkbot.channels import ChannelConfig, ZORK_CHANNEL_NAME
+from zorkbot.channels import BOTS_CHANNEL_NAME, ChannelConfig, ZORK_CHANNEL_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "advert_cooldown_seconds",
     "send_spacing_seconds",
     "max_send_queue_depth",
+    "bots_enabled",
 })
 
 
@@ -63,6 +64,12 @@ class BotConfig:
     send_spacing_seconds: float = 2.0
     max_send_queue_depth: int = 64
 
+    # Mesh bot discovery (!bots roll call) — a separate channel from the
+    # game lobby, disabled by default, and only active once both a
+    # [bots_channel] section is configured and this is set.
+    bots_enabled: bool = False
+    bots_channel: ChannelConfig | None = None
+
     @property
     def admin_pubkeys(self) -> frozenset[str]:
         return frozenset(pk.lower() for pk in self.admin.pubkeys)
@@ -84,8 +91,10 @@ def load_config(path: str | Path | None) -> BotConfig:
 def _apply_toml(config: BotConfig, data: dict) -> None:
     admin = data.get("admin", {})
     channel = data.get("channel", {})
+    bots_channel = data.get("bots_channel", {})
     _warn_misplaced_section_keys("admin", admin, _ADMIN_KEYS)
     _warn_misplaced_section_keys("channel", channel, _CHANNEL_KEYS)
+    _warn_misplaced_section_keys("bots_channel", bots_channel, _CHANNEL_KEYS)
 
     if name := data.get("name"):
         config.name = str(name)
@@ -118,11 +127,22 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.send_spacing_seconds = float(send_spacing_seconds)
     if max_send_queue_depth := _root_value(data, channel, admin, "max_send_queue_depth"):
         config.max_send_queue_depth = int(max_send_queue_depth)
+    bots_enabled = _root_value(data, channel, admin, "bots_enabled")
+    if bots_enabled is None:
+        bots_enabled = bots_channel.get("bots_enabled")
+    if bots_enabled is not None:
+        config.bots_enabled = bool(bots_enabled)
 
     if channel:
         config.channel = ChannelConfig(
             index=int(channel.get("index", config.channel.index)),
             name=str(channel.get("name", ZORK_CHANNEL_NAME)),
+        )
+
+    if bots_channel:
+        config.bots_channel = ChannelConfig(
+            index=int(bots_channel.get("index", 0)),
+            name=str(bots_channel.get("name", BOTS_CHANNEL_NAME)),
         )
 
     if pubkeys := admin.get("pubkeys"):
