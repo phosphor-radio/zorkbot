@@ -12,6 +12,10 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 
 # Session management
 # max_watchers_per_session = 2      # observers allowed per session
+# session_poll_seconds = 30         # how often to check for sessions the game
+#                                   # service ended on its own (inactivity
+#                                   # timeout, PTY crash) so watchers can be
+#                                   # notified; 0 disables polling
 
 # Advertising (send_advert flood=True so players can DM the bot)
 # advert_enabled = false    # MUST be set to true on a live server so players

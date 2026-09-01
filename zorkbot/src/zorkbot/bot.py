@@ -29,6 +29,7 @@ from zorkbot.context import Context, IncomingMessage, ReplyFunc
 from zorkbot.game_client import GameClient
 from zorkbot.rate_limit import RateLimiter
 from zorkbot.session_state import SessionState
+from zorkbot.watcher_notify import notify_watchers_session_ended
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,38 @@ class ZorkBot:
 
     def set_send_dm(self, func: ReplyFunc) -> None:
         self._send_dm = func
+
+    def start_session_poller(self) -> None:
+        """Start polling the game service for sessions it ended server-side
+        (inactivity timeout, PTY crash) so their watchers get notified — the
+        bot has no other way to learn about those. No-op when disabled."""
+        if self.config.session_poll_seconds <= 0:
+            return
+        self._spawn(self._session_poll_loop())
+
+    async def _session_poll_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.config.session_poll_seconds)
+            await self._reconcile_sessions()
+
+    async def _reconcile_sessions(self) -> None:
+        try:
+            server_sessions = await self.game.list_sessions()
+        except Exception:
+            logger.warning("session reconciliation: list_sessions failed", exc_info=True)
+            return
+
+        server_player_ids = {s.player_id for s in server_sessions}
+        for record in self._state.all_sessions():
+            if record.player_id in server_player_ids:
+                continue
+            self._state.remove_session(record.player_id)
+            logger.info(
+                "session=%d player=%s ended server-side — notifying %d watcher(s)",
+                record.num, record.player_id[:8], len(record.watchers),
+            )
+            if self._send_dm:
+                await notify_watchers_session_ended(self._send_dm, record)
 
     async def dispatch_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
         """Handle a message from the #zork channel."""
@@ -279,7 +312,7 @@ class ZorkBot:
             return
 
         if command == "end":
-            await handle_end(ctx, self.game, self._state, rest_args)
+            await handle_end(ctx, self.game, self._state, rest_args, send_dm)
             return
 
         if command == "list":

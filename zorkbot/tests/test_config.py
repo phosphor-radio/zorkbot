@@ -45,6 +45,19 @@ def test_session_defaults() -> None:
     assert config.advert_cooldown_seconds == 300
     assert config.send_spacing_seconds == 2.0
     assert config.max_send_queue_depth == 64
+    assert config.session_poll_seconds == 30
+
+
+def test_session_poll_seconds_from_toml(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("session_poll_seconds = 15\n")
+    assert load_config(config_path).session_poll_seconds == 15
+
+
+def test_session_poll_seconds_can_be_disabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("session_poll_seconds = 0\n")
+    assert load_config(config_path).session_poll_seconds == 0
 
 
 def test_session_config_from_toml(tmp_path: Path) -> None:

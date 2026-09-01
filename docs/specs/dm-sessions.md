@@ -160,6 +160,20 @@ Watcher DMs show the command for context followed by the response:
 You are in a dark forest...
 ```
 
+### Watcher end-of-session notification
+
+When a watched session ends — via the player's own `!end`, an admin `!end <N>`, or the game
+service ending it server-side (inactivity timeout, PTY crash) — every watcher of that session gets
+a DM (`watcher_notify.notify_watchers_session_ended`) and is dropped from `_watching`. The player
+and `#zork` get nothing extra beyond the player's own normal `!end` reply; watchers are the only
+audience for this notification.
+
+The bot has no push channel for server-side session ends, so `ZorkBot._session_poll_loop` polls
+`GET /sessions` every `session_poll_seconds` (default 30; 0 disables it) and diffs the result
+against `SessionState`: any locally-tracked session whose `player_id` is missing from that list is
+treated as ended server-side. A `list_sessions()` failure is treated as "don't know" and skipped,
+never as "no sessions" — that would wrongly end and notify watchers of every session.
+
 ---
 
 ## Game Service (`zorkd`)
@@ -270,6 +284,7 @@ dropped with a warning log.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `max_watchers_per_session` | 2 | Max observers per session |
+| `session_poll_seconds` | 30 | How often to check for sessions the game service ended on its own, to notify watchers; 0 disables |
 | `advert_enabled` | false | Enable advert sending; must be true on a live server |
 | `advert_flood` | true | true = flood (whole mesh); false = zerohop (direct only) |
 | `advert_interval_seconds` | 300 | Background advert timer interval |

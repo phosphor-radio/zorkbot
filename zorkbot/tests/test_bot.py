@@ -16,7 +16,7 @@ from zorkbot.commands.bots import build_reply_text
 from zorkbot.commands.rules import RULES_TEXT
 from zorkbot.config import AdminConfig, BotConfig
 from zorkbot.context import IncomingMessage
-from zorkbot.game_client import GameClient
+from zorkbot.game_client import GameClient, GameServiceError, SessionInfo
 
 PLAYER_ID = "aabbccddeeff"
 PLAYER_NAME = "Alice"
@@ -596,6 +596,184 @@ async def test_watcher_sees_echo_title_and_description_as_separate_lines() -> No
     assert dm_texts == [
         "[Alice] > north\nNorth of House\nYou are facing the north side of a white house."
     ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_end_notifies_watchers_but_not_player_or_channel() -> None:
+    watcher_id = "112233445566"
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        bot._send_dm.reset_mock()
+        replies.clear()
+
+        await bot.dispatch_dm(_dm_message("!end"), reply)
+        await bot.drain()
+
+    # Player still gets their own end confirmation.
+    assert replies == ["Zork I Session #1 saved and ended."]
+    # Watcher gets a separate notification, and nothing else was sent.
+    watcher_calls = bot._send_dm.await_args_list
+    assert len(watcher_calls) == 1
+    assert watcher_calls[0].args == (
+        watcher_id,
+        "Zork I Session #1 (Alice) has ended. You are no longer watching.",
+    )
+    # The watcher is no longer tracked as watching anything.
+    assert bot._state.active_state(watcher_id) == "none"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_end_without_watchers_sends_no_dm() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        bot._send_dm.reset_mock()
+
+        await bot.dispatch_dm(_dm_message("!end"), reply)
+        await bot.drain()
+
+    bot._send_dm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_admin_end_notifies_watchers() -> None:
+    watcher_id = "112233445566"
+    admin_id = "aaaaaaaaaaaa"
+    config = BotConfig(
+        rate_limit_seconds=0.0,
+        admin=AdminConfig(pubkeys=[admin_id]),
+    )
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        bot._send_dm.reset_mock()
+
+        await bot.dispatch_dm(_dm_message("!end 1", pubkey_prefix=admin_id), reply)
+        await bot.drain()
+
+    watcher_calls = bot._send_dm.await_args_list
+    assert len(watcher_calls) == 1
+    assert watcher_calls[0].args == (
+        watcher_id,
+        "Zork I Session #1 (Alice) has ended. You are no longer watching.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_sessions_notifies_watchers_of_server_side_timeout() -> None:
+    """The game service has no way to push a notification when it ends a
+    session on its own (inactivity timeout, PTY crash) — the bot's poller
+    is the only way watchers learn about it."""
+    watcher_id = "112233445566"
+    config = BotConfig(rate_limit_seconds=0.0)
+
+    async def reply(text: str) -> None:
+        pass
+
+    game = MagicMock()
+    game.list_sessions = AsyncMock(return_value=[])  # server no longer has it
+
+    bot = _make_bot(config=config, game=game)
+    bot._state.add_session(PLAYER_ID, PLAYER_NAME)
+    bot._state.add_watcher(watcher_id, 1)
+
+    await bot._reconcile_sessions()
+
+    game.list_sessions.assert_awaited_once()
+    bot._send_dm.assert_awaited_once_with(
+        watcher_id,
+        "Zork I Session #1 (Alice) has ended. You are no longer watching.",
+    )
+    assert bot._state.get_session(PLAYER_ID) is None
+    assert bot._state.active_state(watcher_id) == "none"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_sessions_leaves_active_sessions_alone() -> None:
+    config = BotConfig(rate_limit_seconds=0.0)
+    game = MagicMock()
+    game.list_sessions = AsyncMock(
+        return_value=[SessionInfo(num=1, player_id=PLAYER_ID, started_at="")]
+    )
+
+    bot = _make_bot(config=config, game=game)
+    bot._state.add_session(PLAYER_ID, PLAYER_NAME)
+
+    await bot._reconcile_sessions()
+
+    bot._send_dm.assert_not_awaited()
+    assert bot._state.get_session(PLAYER_ID) is not None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_sessions_survives_list_sessions_failure() -> None:
+    """A transient game-service error must never be treated as "no
+    sessions" — that would wrongly end and notify watchers of everyone."""
+    config = BotConfig(rate_limit_seconds=0.0)
+    game = MagicMock()
+    game.list_sessions = AsyncMock(side_effect=GameServiceError("boom"))
+
+    bot = _make_bot(config=config, game=game)
+    bot._state.add_session(PLAYER_ID, PLAYER_NAME)
+
+    await bot._reconcile_sessions()
+
+    bot._send_dm.assert_not_awaited()
+    assert bot._state.get_session(PLAYER_ID) is not None
+
+
+def test_session_poller_zero_interval_is_noop() -> None:
+    config = BotConfig(session_poll_seconds=0)
+    game = MagicMock()
+    bot = _make_bot(config=config, game=game)
+
+    bot.start_session_poller()
+
+    assert not bot._background_tasks
 
 
 @pytest.mark.asyncio

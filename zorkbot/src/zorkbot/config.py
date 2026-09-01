@@ -28,6 +28,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "send_spacing_seconds",
     "max_send_queue_depth",
     "bots_enabled",
+    "session_poll_seconds",
 })
 
 
@@ -53,6 +54,10 @@ class BotConfig:
 
     # Session management
     max_watchers_per_session: int = 2
+    # How often to poll the game service for sessions it ended server-side
+    # (inactivity timeout, PTY crash) so their watchers can be notified —
+    # the bot has no other way to learn about those. 0 disables polling.
+    session_poll_seconds: int = 30
 
     # Advertising
     advert_enabled: bool = False
@@ -113,6 +118,9 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.rate_limit_seconds = float(rate_limit_seconds)
     if max_watchers_per_session := _root_value(data, channel, admin, "max_watchers_per_session"):
         config.max_watchers_per_session = int(max_watchers_per_session)
+    session_poll_seconds = _root_value(data, channel, admin, "session_poll_seconds")
+    if session_poll_seconds is not None:
+        config.session_poll_seconds = int(session_poll_seconds)
     advert_enabled = _root_value(data, channel, admin, "advert_enabled")
     if advert_enabled is not None:
         config.advert_enabled = bool(advert_enabled)

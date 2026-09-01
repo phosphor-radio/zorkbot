@@ -153,6 +153,7 @@ class MeshCoreRunner:
 
         # Give the bot a reference to send DMs.
         self.bot.set_send_dm(self._send_dm_packets)
+        self.bot.start_session_poller()
 
         await self.meshcore.start_auto_message_fetching()
         logger.info(

@@ -12,6 +12,7 @@ import logging
 from zorkbot.context import Context
 from zorkbot.game_client import GameClient, GameServiceError, SessionNotFoundError
 from zorkbot.session_state import SessionState
+from zorkbot.watcher_notify import notify_watchers_session_ended
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ async def handle_end(
     game: GameClient,
     state: SessionState,
     args: str,
+    send_dm_func,   # async (pubkey_prefix, text) -> None
 ) -> None:
     player_id = ctx.pubkey_prefix
     if not player_id:
@@ -29,7 +31,7 @@ async def handle_end(
 
     # Admin force-end: !end <N>
     if args.strip():
-        await _handle_admin_end(ctx, game, state, args.strip())
+        await _handle_admin_end(ctx, game, state, args.strip(), send_dm_func)
         return
 
     active = state.active_state(player_id)
@@ -41,15 +43,16 @@ async def handle_end(
         return
 
     if active == "playing":
-        record = state.get_session(player_id)
+        record = state.remove_session(player_id)
         num = record.num if record else "?"
-        state.remove_session(player_id)
         try:
             await game.end_session(player_id)
         except (GameServiceError, SessionNotFoundError) as exc:
             logger.warning("end_session failed for player=%s: %s", player_id, exc)
         logger.info("session=%s ended by player=%s", num, player_id)
         await ctx.reply(f"Zork I Session #{num} saved and ended.")
+        if record is not None:
+            await notify_watchers_session_ended(send_dm_func, record)
         return
 
     await ctx.reply("You don't have an active session or watch to end.")
@@ -60,6 +63,7 @@ async def _handle_admin_end(
     game: GameClient,
     state: SessionState,
     arg: str,
+    send_dm_func,   # async (pubkey_prefix, text) -> None
 ) -> None:
     if not ctx.is_admin():
         await ctx.reply("You are not authorized for that command.")
@@ -87,3 +91,4 @@ async def _handle_admin_end(
         "session=%d force-ended by admin=%s", session_num, ctx.pubkey_prefix
     )
     await ctx.reply(f"Zork I Session #{session_num} ({record.player_name}) has been ended.")
+    await notify_watchers_session_ended(send_dm_func, record)

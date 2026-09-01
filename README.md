@@ -323,6 +323,12 @@ Observers receive the command followed by the game response:
 You are in a dark forest...
 ```
 
+When the session they're watching ends — whether the player sends `!end`, an admin force-ends it,
+or the game service ends it server-side after `session_poll_seconds` next detects it (inactivity
+timeout, PTY crash — the bot has no other way to learn about those) — each watcher gets a DM saying
+so and is no longer tracked as watching. Nothing is sent to the player beyond their own normal
+`!end` confirmation, and nothing is posted to `#zork`.
+
 ## Configuration
 
 ### Environment (`.env`)
@@ -349,6 +355,8 @@ rate_limit_seconds = 3.0
 
 # Session management
 max_watchers_per_session = 2    # observers per session
+session_poll_seconds = 30       # how often to check for server-ended sessions
+                                 # (notifies watchers); 0 disables polling
 
 # Advertising
 # MUST be set to true on a live server so players can discover the bot
