@@ -129,10 +129,10 @@ async def handle_game_command(
 
     # Fan-out to watchers.
     if record.watchers:
-        watcher_prefix = f"[{record.player_name}] > {command_text}\n"
         watcher_packets = packetize(
-            watcher_prefix + output,
+            output,
             max_chars=ctx.config.packet_max_chars,
+            first_line=f"[{record.player_name}] > {command_text}",
         )
         for watcher_id in list(record.watchers):
             for packet in watcher_packets:

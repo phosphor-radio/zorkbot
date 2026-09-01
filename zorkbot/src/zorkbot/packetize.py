@@ -31,26 +31,38 @@ def packetize(
     *,
     max_chars: int = DEFAULT_MAX_CHARS,
     prefix: str | None = None,
+    first_line: str | None = None,
     numbered: bool = True,
 ) -> list[str]:
-    """Split game output into mesh-sized packets."""
+    """Split game output into mesh-sized packets.
+
+    `first_line`, if given, is shown as its own line ahead of any detected
+    title and the body — for context that isn't part of the game's own
+    output, e.g. a watcher's "[Alice] > north" echo of the command that
+    produced this text. Unlike `prefix` (repeated on every split packet),
+    it appears once, only on the first packet, so a room title detected in
+    `text` still gets its own line right after it rather than being folded
+    into the echo line.
+    """
     title, body = _prepare_text(text)
-    if not title and not body:
+    if not title and not body and not first_line:
         return []
 
     mention = prefix or ""
+    lead_lines = [line for line in (first_line, title) if line]
+    lead = "\n".join(lead_lines)
 
     if not body:
-        return [f"{mention}{title}"]
+        return [f"{mention}{lead}"] if lead else []
 
-    # The title (if any) rides along on packet 1 only, so its length is
-    # budgeted out of every packet uniformly rather than tracking a
+    # The lead lines (if any) ride along on packet 1 only, so their length
+    # is budgeted out of every packet uniformly rather than tracking a
     # per-packet limit — a small, constant waste of space on packets 2+
-    # given how short room titles are, in exchange for reusing the same
+    # given how short these lines are, in exchange for reusing the same
     # single-limit packing logic below unchanged.
-    title_prefix = f"{title}\n" if title else ""
+    lead_prefix = f"{lead}\n" if lead else ""
     chunks = _pack_with_sequence_budget(
-        body, max_chars - len(mention) - len(title_prefix), numbered
+        body, max_chars - len(mention) - len(lead_prefix), numbered
     )
     packets: list[str] = []
     total = len(chunks)
@@ -59,8 +71,8 @@ def packetize(
         body_chunk = chunk
         if numbered and total > 1:
             body_chunk = f"({index}/{total}) {chunk}"
-        lead = title_prefix if index == 1 else ""
-        packets.append(f"{mention}{lead}{body_chunk}")
+        this_lead = lead_prefix if index == 1 else ""
+        packets.append(f"{mention}{this_lead}{body_chunk}")
 
     return packets
 

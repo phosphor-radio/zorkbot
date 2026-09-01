@@ -558,6 +558,47 @@ async def test_game_command_in_dm() -> None:
 
 
 @pytest.mark.asyncio
+@respx.mock
+async def test_watcher_sees_echo_title_and_description_as_separate_lines() -> None:
+    """A watcher's relay includes a "[Name] > command" echo line ahead of
+    the game's own output — this must not defeat title/line-break detection
+    on the real output, which only looks at that output's own first line."""
+    watcher_id = "112233445566"
+    config = BotConfig(rate_limit_seconds=0.0)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "output": "North of House\nYou are facing the north side of a white house.",
+            },
+        )
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        bot._send_dm.reset_mock()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await bot.drain()
+
+    dm_texts = [call.args[1] for call in bot._send_dm.await_args_list]
+    assert dm_texts == [
+        "[Alice] > north\nNorth of House\nYou are facing the north side of a white house."
+    ]
+
+
+@pytest.mark.asyncio
 async def test_game_command_without_session_prompts_start() -> None:
     config = BotConfig()
     replies: list[str] = []

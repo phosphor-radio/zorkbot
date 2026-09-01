@@ -146,3 +146,46 @@ def test_looks_like_title_rejects_long_lines() -> None:
 
 def test_looks_like_title_rejects_empty() -> None:
     assert not _looks_like_title("")
+
+
+def test_packetize_first_line_precedes_detected_title() -> None:
+    """A watcher's "[Name] > command" echo must not swallow the room title
+    detection, which only ever looks at the start of `text` itself."""
+    text = "North of House\nYou are facing the north side of a white house."
+    packets = packetize(
+        text, max_chars=120, first_line="[Alice] > north", numbered=False
+    )
+    assert packets == [
+        "[Alice] > north\nNorth of House\nYou are facing the north side of a white house."
+    ]
+
+
+def test_packetize_first_line_with_non_title_body() -> None:
+    packets = packetize(
+        "Taken.", max_chars=120, first_line="[Alice] > take lamp", numbered=False
+    )
+    assert packets == ["[Alice] > take lamp\nTaken."]
+
+
+def test_packetize_first_line_appears_once_across_multiple_packets() -> None:
+    text = (
+        "North of House\n"
+        "You are facing the north side of a white house. There is no door "
+        "here, and all the windows are boarded up. To the north a narrow "
+        "path winds through the trees."
+    )
+    packets = packetize(text, max_chars=100, first_line="[Alice] > north")
+    assert len(packets) > 1
+    assert packets[0].startswith("[Alice] > north\nNorth of House\n(1/")
+    assert "[Alice]" not in packets[1]
+    assert "\n" not in packets[1]
+
+
+def test_packetize_first_line_alone_with_no_body() -> None:
+    packets = packetize("", max_chars=100, first_line="[Alice] > look")
+    assert packets == ["[Alice] > look"]
+
+
+def test_packetize_no_first_line_is_unaffected() -> None:
+    packets = packetize("Taken.", max_chars=100, numbered=False)
+    assert packets == ["Taken."]
