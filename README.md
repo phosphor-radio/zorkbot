@@ -39,7 +39,7 @@ LoRa mesh is slow and packet-sized (~140 characters on the wire). Zorkbot is bui
 - **Per-player queues** — Each player has their own command queue; one player's slow commands don't block others.
 - **Per-player rate limit** — Default 3 seconds between commands from the same player.
 - **Spaced RF sends** — All outgoing transmissions (DMs and channel messages) share a single send gate with configurable spacing (default 2 s) so radios and repeaters can keep up.
-- **Quiet startup** — No startup announcement on channel by default.
+- **Quiet startup** — No startup announcement on channel by default, and the backlog the radio queued while the bot was down is flushed rather than replayed.
 - **Filtered input** — Debug and meta-commands (e.g. `$`-prefixed encrusted commands) are blocked.
 
 ## Architecture
@@ -81,6 +81,10 @@ If a player issues `!start` on the channel but the bot has not received their ad
 
 The companion radio's contact table holds 100 entries. By default, once full, the firmware silently drops adverts from new nodes instead of adding them — which would eventually make new players indistinguishable from ones who've never advertised (same "not in my contacts yet" symptom, but permanent no matter how many times they DM). At startup zorkbot enables the firmware's overwrite-oldest-on-full behavior (`apply_settings` in [`runner.py`](zorkbot/src/zorkbot/runner.py)), so once the table fills, the least-recently-active contact is evicted to make room rather than the new one being rejected — the same LRU trade-off zorkbot already makes for idle game sessions, one layer down at the radio.
 
+
+### Offline message backlog
+
+The radio holds every message it receives while no client is attached and hands the whole backlog over as soon as one connects — so a bot restart would otherwise replay hours of old traffic at full speed, spawning sessions for `!start`s nobody is waiting on and answering commands long since abandoned. Before subscribing any handler, `MeshCoreRunner.start` drains the device queue with repeated `get_msg()` calls until the firmware reports no more messages (`flush_pending_messages` in [`runner.py`](zorkbot/src/zorkbot/runner.py)). Fetched messages are dispatched as events, so draining while nothing is subscribed discards them; only traffic that arrives after startup reaches the bot. The discard is silent to the sender — someone who DMs a command seconds before a restart gets no reply — so the number dropped is reported on the [admin web UI](#admin-web-ui)'s `/api/status` as `startup_flushed_messages`.
 
 
 ## Prerequisites

@@ -93,6 +93,43 @@ async def _ensure_contacts_overwrite_oldest(meshcore: MeshCore) -> None:
     _log_apply("contact table overwrite-oldest on full", result)
 
 
+# The radio queues everything it receives while no client is attached and
+# hands the whole backlog over on connect. Without draining it first, a
+# restart makes the bot answer commands sent hours ago the moment it comes
+# up: stale !start requests spawn sessions nobody is waiting on, and old
+# channel chatter gets replayed at everyone. The cap keeps startup bounded
+# if the device never reports NO_MORE_MSGS or the mesh is busy enough that
+# new traffic arrives as fast as it is pulled.
+_MAX_FLUSH_MESSAGES = 500
+
+
+async def flush_pending_messages(meshcore: MeshCore) -> int:
+    """Pull and discard the messages queued while the bot was offline.
+
+    Must run before the CHANNEL_MSG_RECV/CONTACT_MSG_RECV subscriptions
+    exist: get_msg() dispatches each fetched message as an event, so
+    draining early means the backlog is delivered to no handler.
+    """
+    flushed = 0
+    while flushed < _MAX_FLUSH_MESSAGES:
+        result = await meshcore.commands.get_msg()
+        if result.type in (EventType.NO_MORE_MSGS, EventType.ERROR):
+            break
+        flushed += 1
+    else:
+        logger.warning(
+            "stopped flushing after %d queued message(s); the rest will be "
+            "handled live",
+            flushed,
+        )
+
+    if flushed:
+        logger.info("flushed %d message(s) queued while offline", flushed)
+    else:
+        logger.info("no queued messages to flush")
+    return flushed
+
+
 def _log_apply(description: str, result: Event) -> None:
     if result.type == EventType.ERROR:
         logger.warning("failed to %s: %r", description, result.payload)
@@ -126,6 +163,13 @@ class MeshCoreRunner:
         # immediately, so newly-advertised players are recognized live.
         self.meshcore.auto_update_contacts = True
         await self.meshcore.ensure_contacts()
+
+        # Drop the offline backlog before any handler is listening. The
+        # count is surfaced on the admin UI's /api/status so a restart that
+        # silently swallowed a pile of traffic is visible after the fact.
+        self.bot.set_startup_flushed_messages(
+            await flush_pending_messages(self.meshcore)
+        )
 
         self._channel_sub = self.meshcore.subscribe(
             EventType.CHANNEL_MSG_RECV,

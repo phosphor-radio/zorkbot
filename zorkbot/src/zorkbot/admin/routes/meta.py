@@ -34,6 +34,7 @@ async def status(request: Request, _entry: dict = Depends(require_scope())) -> d
         "uptime_seconds": int(time.monotonic() - bot._started_at),
         "active_sessions": len(bot.session_state.all_sessions()),
         "send_queue_depth": bot.send_queue_depth,
+        "startup_flushed_messages": bot.startup_flushed_messages,
         "game_service_reachable": game_reachable,
         "event_queue_depth": ctx.sink._queue.qsize(),
         "event_queue_dropped": ctx.sink._drop_count,

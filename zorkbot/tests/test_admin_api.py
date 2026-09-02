@@ -183,3 +183,19 @@ async def test_status_endpoint(client) -> None:
     body = r.json()
     assert body["bot_run_id"] == "testrun"
     assert body["active_sessions"] == 0
+    # No runner drained a radio for this bot, so the field is null rather
+    # than 0 — "never ran" is not the same as "flushed nothing".
+    assert body["startup_flushed_messages"] is None
+
+
+@pytest.mark.asyncio
+async def test_status_reports_startup_flush_count(client) -> None:
+    """A restart that silently swallowed a backlog is otherwise invisible —
+    the operator sees only that old commands went unanswered."""
+    client.bot.set_startup_flushed_messages(7)
+
+    token = await _admin_token(client)
+    r = await client.get("/api/status", headers={"Authorization": f"Bearer {token}"})
+
+    assert r.status_code == 200
+    assert r.json()["startup_flushed_messages"] == 7

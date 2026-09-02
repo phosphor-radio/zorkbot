@@ -1,6 +1,6 @@
 # Administrative Web UI
 
-**Status:** Implemented (branch `spec/admin-web-ui`, not yet merged) — see [Deviations from this spec](#deviations-from-this-spec)
+**Status:** Implemented and merged to `main` ([#2](https://github.com/phosphor-radio/zorkbot/pull/2), 2026-09-01) — see [Deviations from this spec](#deviations-from-this-spec)  
 **Supersedes:** the "Management web UI" line under Future Work in [`dm-sessions.md`](dm-sessions.md)
 
 A LAN-accessible single-operator web console for monitoring zorkbot: live sessions and watchers,
@@ -25,7 +25,7 @@ Implementation matches this spec except for two points, both called out inline w
 Everything else — schema, API surface, auth flow, config keys, file layout — was built as specified.
 206 tests pass (170 pre-existing + 36 new); the full flow (login, forced password change, live SSE
 watch against real game output, history, charts, players) was also verified manually in a browser
-against the simulator. Not yet merged to `main`.
+against the simulator.
 
 ---
 
@@ -434,8 +434,15 @@ already applies.
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| `GET` | `/api/status` | admin | Bot uptime, version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count |
+| `GET` | `/api/status` | admin | Bot uptime, version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count, count of offline-backlog messages discarded at startup |
 | `GET` | `/health` | none | Liveness only — `{"status":"ok"}`, no data |
+
+`startup_flushed_messages` reports how many queued-while-offline messages `MeshCoreRunner.start()`
+discarded when the bot came up (see the offline-backlog section in
+[dm-sessions.md](dm-sessions.md)). Without it, a restart that swallowed a pile of traffic is
+invisible to the operator — players' commands simply went unanswered with nothing in the API to
+say why. It is `null`, not `0`, when no radio was drained at all (simulate mode), since "never
+ran" and "flushed nothing" are different states.
 
 ---
 
