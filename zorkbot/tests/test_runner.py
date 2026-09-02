@@ -7,20 +7,26 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from meshcore.events import Event, EventType
 
+import zorkbot.runner as runner_module
 from zorkbot.channels import ChannelConfig
 from zorkbot.config import BotConfig
-from zorkbot.runner import apply_settings, MeshCoreRunner
+from zorkbot.runner import apply_settings, flush_pending_messages, MeshCoreRunner
 
 PUBKEY_PREFIX = "aabbccddeeff"
 PLAYER_NAME = "Alice"
 
 
-def _make_meshcore(contact=None):
+def _make_meshcore(contact=None, queued_messages=()):
     mc = MagicMock()
     mc.get_contact_by_name = MagicMock(return_value=contact)
     mc.get_contact_by_key_prefix = MagicMock(return_value=None)
     mc.ensure_contacts = AsyncMock()
     mc.start_auto_message_fetching = AsyncMock()
+    # get_msg() drains the device's offline backlog one message at a time,
+    # then reports NO_MORE_MSGS.
+    mc.commands.get_msg = AsyncMock(
+        side_effect=[*queued_messages, Event(EventType.NO_MORE_MSGS, {})]
+    )
     return mc
 
 
@@ -190,3 +196,60 @@ async def test_apply_settings_skips_bots_channel_when_disabled():
     await apply_settings(meshcore, BotConfig())
 
     meshcore.commands.set_channel.assert_awaited_once()
+
+
+def _queued_channel_msg(text: str) -> Event:
+    return Event(EventType.CHANNEL_MSG_RECV, {"channel_idx": 1, "text": text})
+
+
+@pytest.mark.asyncio
+async def test_start_flushes_backlog_before_subscribing():
+    """The radio holds every message received while no client was attached
+    and replays the lot on connect. If the handlers are subscribed first,
+    the bot answers commands sent hours ago the instant it starts up, so
+    start() must drain the queue while nothing is listening."""
+    queued = [_queued_channel_msg(f"{PLAYER_NAME}: !start") for _ in range(3)]
+    meshcore = _make_meshcore(queued_messages=queued)
+    runner = _make_runner(meshcore)
+
+    await runner.start()
+
+    # Three backlog messages plus the NO_MORE_MSGS that ends the drain.
+    assert meshcore.commands.get_msg.await_count == 4
+    runner.bot.dispatch_channel.assert_not_awaited()
+    assert runner._channel_sub is not None
+
+
+@pytest.mark.asyncio
+async def test_flush_stops_on_error():
+    """A get_msg() timeout or device error comes back as ERROR, not
+    NO_MORE_MSGS — treating it as anything but the end of the queue would
+    spin startup forever against an unresponsive radio."""
+    meshcore = MagicMock()
+    meshcore.commands.get_msg = AsyncMock(
+        side_effect=[
+            _queued_channel_msg("Alice: hello"),
+            Event(EventType.ERROR, {"reason": "timeout"}),
+            Event(EventType.NO_MORE_MSGS, {}),
+        ]
+    )
+
+    flushed = await flush_pending_messages(meshcore)
+
+    assert flushed == 1
+    assert meshcore.commands.get_msg.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_flush_gives_up_after_cap():
+    """A device that never reports NO_MORE_MSGS (or a mesh busy enough to
+    refill the queue as fast as it drains) must not wedge startup."""
+    meshcore = MagicMock()
+    meshcore.commands.get_msg = AsyncMock(
+        return_value=_queued_channel_msg("Alice: hello")
+    )
+
+    flushed = await flush_pending_messages(meshcore)
+
+    assert flushed == runner_module._MAX_FLUSH_MESSAGES
+    assert meshcore.commands.get_msg.await_count == runner_module._MAX_FLUSH_MESSAGES
