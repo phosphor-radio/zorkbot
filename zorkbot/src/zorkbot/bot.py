@@ -80,6 +80,10 @@ class ZorkBot:
         # Injected by the runner after construction.
         self._send_dm: ReplyFunc | None = None
         self._send_queue_depth_getter: Callable[[], int | None] = lambda: None
+        # How many queued-while-offline messages the runner discarded at
+        # startup. Stays None when nothing drained a radio (simulate mode),
+        # which is a different thing from having drained zero.
+        self._startup_flushed_messages: int | None = None
 
     @property
     def name(self) -> str:
@@ -102,6 +106,13 @@ class ZorkBot:
 
     def set_send_queue_depth_getter(self, func: Callable[[], int | None]) -> None:
         self._send_queue_depth_getter = func
+
+    @property
+    def startup_flushed_messages(self) -> int | None:
+        return self._startup_flushed_messages
+
+    def set_startup_flushed_messages(self, count: int) -> None:
+        self._startup_flushed_messages = count
 
     def start_session_poller(self) -> None:
         """Start polling the game service for sessions it ended server-side

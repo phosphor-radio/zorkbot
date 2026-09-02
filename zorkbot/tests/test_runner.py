@@ -218,6 +218,8 @@ async def test_start_flushes_backlog_before_subscribing():
     assert meshcore.commands.get_msg.await_count == 4
     runner.bot.dispatch_channel.assert_not_awaited()
     assert runner._channel_sub is not None
+    # Reported to the admin UI's /api/status.
+    runner.bot.set_startup_flushed_messages.assert_called_once_with(3)
 
 
 @pytest.mark.asyncio

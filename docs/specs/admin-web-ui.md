@@ -430,11 +430,18 @@ silently interpolate across gaps. Range is capped so a request cannot return mor
 `pubkey_prefix` is validated against `^[0-9a-f]{12}$` in every handler, matching the rule `zorkd`
 already applies.
 
+`startup_flushed_messages` reports how many queued-while-offline messages `MeshCoreRunner.start()`
+discarded when the bot came up (see the offline-backlog section in
+[dm-sessions.md](dm-sessions.md)). Without it, a restart that swallowed a pile of traffic is
+invisible to the operator — players' commands simply went unanswered with nothing in the API to
+say why. It is `null`, not `0`, when no radio was drained at all (simulate mode), since "never
+ran" and "flushed nothing" are different states.
+
 ### Meta
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| `GET` | `/api/status` | admin | Bot uptime, version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count |
+| `GET` | `/api/status` | admin | Bot uptime, version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count, count of offline-backlog messages discarded at startup |
 | `GET` | `/health` | none | Liveness only — `{"status":"ok"}`, no data |
 
 ---

@@ -40,6 +40,31 @@ many times they advertise or DM — with no way to fix it. `MeshCoreRunner.start
 0) unconditionally at startup, so the least-recently-active contact is evicted to make room
 instead — the same LRU trade-off as the idle-session timeouts above, one layer down at the radio.
 
+### Offline message backlog
+
+The companion radio queues every message it receives while no client is attached and hands the
+whole backlog over as soon as one connects. Message bodies only ever arrive as replies to
+`get_msg()` — the firmware pushes a bare `MESSAGES_WAITING` notification and nothing more — so
+the backlog lands the moment the bot starts fetching, not before.
+
+Left alone, that makes a restart replay hours of stale traffic at full speed: `!start` requests
+spawn sessions for players who walked away, and long-abandoned game commands get answered as if
+they had just been typed. `MeshCoreRunner.start()` therefore drains the queue with repeated
+`get_msg()` calls (`flush_pending_messages`) *before* subscribing `CHANNEL_MSG_RECV` /
+`CONTACT_MSG_RECV`. Each fetched message is dispatched as an event, so draining while nothing is
+subscribed delivers the backlog to no handler and discards it. Ordering is what makes this work —
+nothing else issues a `get_msg()` in that window, since `apply_settings` and `ensure_contacts`
+don't fetch messages and `start_auto_message_fetching()` runs later.
+
+A 500-message cap bounds startup against a device that never reports `NO_MORE_MSGS`, or a mesh
+busy enough to refill the queue as fast as it drains; hitting it logs a warning and lets the
+remainder through to the live handlers. `ERROR` (which is also how a `get_msg()` timeout comes
+back) ends the drain the same way `NO_MORE_MSGS` does.
+
+The discard is unconditional and silent to the sender: a player who DMs a command seconds before
+a restart gets no reply and no explanation. The count is reported on the admin UI's
+`/api/status` as `startup_flushed_messages` so the operator can at least see it happened.
+
 ---
 
 ## Architecture

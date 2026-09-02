@@ -164,8 +164,12 @@ class MeshCoreRunner:
         self.meshcore.auto_update_contacts = True
         await self.meshcore.ensure_contacts()
 
-        # Drop the offline backlog before any handler is listening.
-        await flush_pending_messages(self.meshcore)
+        # Drop the offline backlog before any handler is listening. The
+        # count is surfaced on the admin UI's /api/status so a restart that
+        # silently swallowed a pile of traffic is visible after the fact.
+        self.bot.set_startup_flushed_messages(
+            await flush_pending_messages(self.meshcore)
+        )
 
         self._channel_sub = self.meshcore.subscribe(
             EventType.CHANNEL_MSG_RECV,
