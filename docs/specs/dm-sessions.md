@@ -320,4 +320,6 @@ never enforces a pool cap or session timeout.
 ## Future Work
 
 - **Management web UI**: LAN-accessible interface for session monitoring and admin actions.
-- **Player ban support**: Persistent ban list keyed on `pubkey_prefix`.
+  Specified in [`admin-web-ui.md`](admin-web-ui.md).
+- **Player ban support**: Persistent ban list keyed on `pubkey_prefix`. Deferred within
+  [`admin-web-ui.md`](admin-web-ui.md), which reserves the column and endpoints.
