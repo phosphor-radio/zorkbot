@@ -240,6 +240,7 @@ On mesh, send `!help` on `#zork`, then `!start` to begin a session.
 | `./data/saves` | `/data` (game) | Per-player save directories (`<pubkey_prefix>/`) |
 | `./games/zork1.z3` | `/game/zork1.z3` (game) | Zork I story file (read-only) |
 | `./zorkbot/zorkbot.toml` | `/app/zorkbot.toml` (zorkbot) | Bot config (read-only) |
+| `./data/admin` | `/data` (zorkbot) | Admin UI SQLite database (only used when `[admin_ui] enabled = true`) |
 
 Protect save data on the Pi:
 
@@ -342,6 +343,8 @@ so and is no longer tracked as watching. Nothing is sent to the player beyond th
 | `MAX_ACTIVE_SESSIONS` | Override max concurrent sessions (default `8`) |
 | `SESSION_IDLE_START_SECONDS` | Override idle-start timeout (default `300`) |
 | `SESSION_INACTIVITY_SECONDS` | Override inactivity timeout (default `1800`) |
+| `ADMIN_UI_ENABLED` | Enable the [admin web UI](#admin-web-ui) (default `false`) |
+| `ADMIN_UI_PORT` | Host port to publish it on (default `8081`) |
 
 ### Bot config (`zorkbot/zorkbot.toml`)
 
@@ -384,6 +387,12 @@ name = "#zork"
 
 [admin]
 pubkeys = ["aabbccddeeff"]      # 12-char hex pubkey_prefix of admin users
+
+# Admin web UI — off by default. See "Admin web UI" below.
+[admin_ui]
+enabled = false
+# bind = "0.0.0.0"
+# port = 8081
 ```
 
 ## Admin access
@@ -394,6 +403,36 @@ To find your prefix: look up your node's public key in the MeshCore app (Contact
 
 Admin commands:
 - `!end <N>` — force-end any session by number (DM only)
+
+## Admin web UI
+
+An optional, LAN-accessible web console runs embedded inside the `zorkbot` process — live
+sessions and watchers, live session watch, session start/end history, session/message/command
+charts, and per-player stats. It talks to a small OAuth2-shaped API backed by its own SQLite
+database (`/data/admin.db` in the container), separate from the game's save data. Full design in
+[`docs/specs/admin-web-ui.md`](docs/specs/admin-web-ui.md).
+
+It is **off by default**. To enable it, set in `zorkbot/zorkbot.toml`:
+
+```toml
+[admin_ui]
+enabled = true
+bind = "0.0.0.0"     # or "127.0.0.1" to restrict to the host only
+port = 8081
+```
+
+or set `ADMIN_UI_ENABLED=true` in `.env` / the environment. Then publish the port in
+`docker-compose.yml` (already wired to `${ADMIN_UI_PORT:-8081}`) and browse to
+`http://<pi-address>:8081`.
+
+**First login:** username `admin`, password `zorkbot-admin!`. The UI forces a password change on
+first login and will not let you do anything else until you set one (12+ characters). Change it
+again any time from the Settings tab.
+
+**This is plaintext HTTP.** The login password and bearer tokens are readable by anything on the
+same network segment — there is no built-in TLS. Keep it on a trusted LAN, or front it with a TLS
+reverse proxy / reach it over a VPN (WireGuard, Tailscale) if it needs to be reachable more
+broadly. Never expose it directly to the internet.
 
 ## Local development
 

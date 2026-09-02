@@ -153,6 +153,7 @@ class MeshCoreRunner:
 
         # Give the bot a reference to send DMs.
         self.bot.set_send_dm(self._send_dm_packets)
+        self.bot.set_send_queue_depth_getter(lambda: self._send_queue_depth)
         self.bot.start_session_poller()
 
         await self.meshcore.start_auto_message_fetching()
@@ -246,6 +247,7 @@ class MeshCoreRunner:
             (message.pubkey_prefix or "?")[:8],
             message.text,
         )
+        self._record_rx(message)
 
         async def reply(text: str) -> None:
             await self._send_chan_msg(message.channel_idx, text)
@@ -260,11 +262,24 @@ class MeshCoreRunner:
             (message.pubkey_prefix or "?")[:8],
             message.text,
         )
+        self._record_rx(message)
 
         async def reply(text: str) -> None:
             await self._send_chan_msg(message.channel_idx, text)
 
         await self.bot.dispatch_bots_channel(message, reply)
+
+    def _record_rx(self, message: IncomingMessage) -> None:
+        if message.pubkey_prefix:
+            self.bot.event_sink.player_seen(
+                pubkey_prefix=message.pubkey_prefix, name=message.sender_name
+            )
+        self.bot.event_sink.message_rx(
+            transport="dm" if message.is_dm else "channel",
+            channel_idx=None if message.is_dm else message.channel_idx,
+            pubkey_prefix=message.pubkey_prefix,
+            chars=len(message.text),
+        )
 
     async def _on_dm_msg(self, event: Event) -> None:
         payload = event.payload
@@ -293,6 +308,7 @@ class MeshCoreRunner:
             (pubkey_prefix or "?")[:8],
             text,
         )
+        self._record_rx(message)
 
         async def reply(reply_text: str) -> None:
             if pubkey_prefix:
@@ -310,19 +326,40 @@ class MeshCoreRunner:
 
     async def _send_dm(self, pubkey_prefix: str, text: str) -> None:
         await self._send_with_spacing(
-            self.meshcore.commands.send_msg(pubkey_prefix, text)
+            self.meshcore.commands.send_msg(pubkey_prefix, text),
+            transport="dm",
+            pubkey_prefix=pubkey_prefix,
+            chars=len(text),
         )
 
     async def _send_chan_msg(self, channel_idx: int, text: str) -> Event:
         return await self._send_with_spacing(
-            self.meshcore.commands.send_chan_msg(channel_idx, text)
+            self.meshcore.commands.send_chan_msg(channel_idx, text),
+            transport="channel",
+            channel_idx=channel_idx,
+            chars=len(text),
         )
 
-    async def _send_with_spacing(self, coro) -> Any:
+    async def _send_with_spacing(
+        self,
+        coro,
+        *,
+        transport: str = "dm",
+        channel_idx: int | None = None,
+        pubkey_prefix: str | None = None,
+        chars: int = 0,
+    ) -> Any:
         max_depth = self.bot.config.max_send_queue_depth
         if self._send_queue_depth >= max_depth:
             logger.warning(
                 "send queue overflow (depth=%d) — dropping packet", self._send_queue_depth
+            )
+            self.bot.event_sink.message_tx(
+                transport=transport,
+                channel_idx=channel_idx,
+                pubkey_prefix=pubkey_prefix,
+                chars=chars,
+                dropped=True,
             )
             return None
 
@@ -335,7 +372,14 @@ class MeshCoreRunner:
                     if remaining > 0:
                         await asyncio.sleep(remaining)
                 try:
-                    return await coro
+                    result = await coro
+                    self.bot.event_sink.message_tx(
+                        transport=transport,
+                        channel_idx=channel_idx,
+                        pubkey_prefix=pubkey_prefix,
+                        chars=chars,
+                    )
+                    return result
                 finally:
                     self._last_send_at = asyncio.get_running_loop().time()
         finally:

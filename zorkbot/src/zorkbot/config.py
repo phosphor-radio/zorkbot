@@ -13,6 +13,12 @@ from zorkbot.channels import BOTS_CHANNEL_NAME, ChannelConfig, ZORK_CHANNEL_NAME
 logger = logging.getLogger(__name__)
 
 _ADMIN_KEYS = frozenset({"pubkeys"})
+_ADMIN_UI_KEYS = frozenset({
+    "enabled", "bind", "port", "db_path",
+    "access_token_ttl_seconds", "refresh_token_ttl_seconds",
+    "event_retention_days", "event_queue_size",
+    "live_buffer_events", "max_live_streams",
+})
 _CHANNEL_KEYS = frozenset({"index", "name", "secret"})
 _ROOT_OPTIONAL_KEYS = frozenset({
     "log_level",
@@ -39,11 +45,27 @@ class AdminConfig:
 
 
 @dataclass
+class AdminUIConfig:
+    # Master switch: false = no HTTP server, no event logging, no DB file.
+    enabled: bool = False
+    bind: str = "0.0.0.0"
+    port: int = 8081
+    db_path: str = "/data/admin.db"
+    access_token_ttl_seconds: int = 1800
+    refresh_token_ttl_seconds: int = 2592000
+    event_retention_days: int = 90
+    event_queue_size: int = 1024
+    live_buffer_events: int = 50
+    max_live_streams: int = 4
+
+
+@dataclass
 class BotConfig:
     name: str = "zorkbot"
     channel: ChannelConfig = field(default_factory=lambda: ChannelConfig(index=1))
     game_url: str = "http://game:8080"
     admin: AdminConfig = field(default_factory=AdminConfig)
+    admin_ui: AdminUIConfig = field(default_factory=AdminUIConfig)
     log_level: str | None = None
     packet_max_chars: int = 120
     announce_on_start: bool = False
@@ -90,14 +112,25 @@ def load_config(path: str | Path | None) -> BotConfig:
     if game_url := os.getenv("GAME_URL"):
         config.game_url = game_url
 
+    if admin_ui_enabled := os.getenv("ADMIN_UI_ENABLED"):
+        config.admin_ui.enabled = admin_ui_enabled.strip().lower() in ("1", "true", "yes", "on")
+    if admin_ui_bind := os.getenv("ADMIN_UI_BIND"):
+        config.admin_ui.bind = admin_ui_bind
+    if admin_ui_port := os.getenv("ADMIN_UI_PORT"):
+        config.admin_ui.port = int(admin_ui_port)
+    if admin_ui_db := os.getenv("ADMIN_UI_DB"):
+        config.admin_ui.db_path = admin_ui_db
+
     return config
 
 
 def _apply_toml(config: BotConfig, data: dict) -> None:
     admin = data.get("admin", {})
+    admin_ui = data.get("admin_ui", {})
     channel = data.get("channel", {})
     bots_channel = data.get("bots_channel", {})
     _warn_misplaced_section_keys("admin", admin, _ADMIN_KEYS)
+    _warn_misplaced_section_keys("admin_ui", admin_ui, _ADMIN_UI_KEYS)
     _warn_misplaced_section_keys("channel", channel, _CHANNEL_KEYS)
     _warn_misplaced_section_keys("bots_channel", bots_channel, _CHANNEL_KEYS)
 
@@ -155,6 +188,29 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
 
     if pubkeys := admin.get("pubkeys"):
         config.admin = AdminConfig(pubkeys=[str(pk) for pk in pubkeys])
+
+    if admin_ui:
+        ui = config.admin_ui
+        if "enabled" in admin_ui:
+            ui.enabled = bool(admin_ui["enabled"])
+        if "bind" in admin_ui:
+            ui.bind = str(admin_ui["bind"])
+        if "port" in admin_ui:
+            ui.port = int(admin_ui["port"])
+        if "db_path" in admin_ui:
+            ui.db_path = str(admin_ui["db_path"])
+        if "access_token_ttl_seconds" in admin_ui:
+            ui.access_token_ttl_seconds = int(admin_ui["access_token_ttl_seconds"])
+        if "refresh_token_ttl_seconds" in admin_ui:
+            ui.refresh_token_ttl_seconds = int(admin_ui["refresh_token_ttl_seconds"])
+        if "event_retention_days" in admin_ui:
+            ui.event_retention_days = int(admin_ui["event_retention_days"])
+        if "event_queue_size" in admin_ui:
+            ui.event_queue_size = int(admin_ui["event_queue_size"])
+        if "live_buffer_events" in admin_ui:
+            ui.live_buffer_events = int(admin_ui["live_buffer_events"])
+        if "max_live_streams" in admin_ui:
+            ui.max_live_streams = int(admin_ui["max_live_streams"])
 
 
 def _warn_misplaced_section_keys(section: str, values: dict, allowed: frozenset[str]) -> None:

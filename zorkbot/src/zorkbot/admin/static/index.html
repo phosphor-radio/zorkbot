@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zorkbot admin</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="login-view" class="view">
+    <form id="login-form" class="login-card">
+      <h1>zorkbot admin</h1>
+      <label>Username<input id="login-username" type="text" value="admin" autocomplete="username" required></label>
+      <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="error" hidden></p>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <div id="password-view" class="view" hidden>
+    <form id="password-form" class="login-card">
+      <h1>Set a new password</h1>
+      <p>You're using the default admin password. Choose a new one (12+ characters) before continuing.</p>
+      <label>Current password<input id="pw-current" type="password" autocomplete="current-password" required></label>
+      <label>New password<input id="pw-new" type="password" autocomplete="new-password" minlength="12" required></label>
+      <label>Confirm new password<input id="pw-confirm" type="password" autocomplete="new-password" minlength="12" required></label>
+      <p id="password-error" class="error" hidden></p>
+      <button type="submit">Change password</button>
+    </form>
+  </div>
+
+  <div id="app-view" class="view" hidden>
+    <header>
+      <h1>zorkbot admin</h1>
+      <nav>
+        <button class="tab" data-tab="live">Live</button>
+        <button class="tab" data-tab="history">History</button>
+        <button class="tab" data-tab="charts">Charts</button>
+        <button class="tab" data-tab="players">Players</button>
+        <button class="tab" data-tab="settings">Settings</button>
+      </nav>
+      <button id="logout-btn" class="ghost">Sign out</button>
+    </header>
+
+    <main>
+      <section id="tab-live" class="tab-panel">
+        <h2>Active sessions</h2>
+        <table id="live-table">
+          <thead><tr><th>#</th><th>Player</th><th>Duration</th><th>Watchers</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="live-stream" hidden>
+          <div class="stream-head">
+            <span id="live-stream-title"></span>
+            <button id="live-stream-close" class="ghost">Close</button>
+          </div>
+          <pre id="live-stream-log"></pre>
+        </div>
+      </section>
+
+      <section id="tab-history" class="tab-panel" hidden>
+        <h2>Session history</h2>
+        <form id="history-filters" class="filters">
+          <label>From <input type="datetime-local" id="hist-from"></label>
+          <label>To <input type="datetime-local" id="hist-to"></label>
+          <label>Player <input type="text" id="hist-player" placeholder="pubkey prefix" maxlength="12"></label>
+          <button type="submit">Filter</button>
+        </form>
+        <table id="history-table">
+          <thead><tr><th>#</th><th>Player</th><th>Started</th><th>Ended</th><th>Duration</th><th>Reason</th><th>Peak watchers</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button id="history-more" class="ghost">Load more</button>
+      </section>
+
+      <section id="tab-charts" class="tab-panel" hidden>
+        <h2>Charts</h2>
+        <form id="chart-range" class="filters">
+          <label>Range
+            <select id="chart-range-select">
+              <option value="3600">Last hour</option>
+              <option value="86400" selected>Last 24 hours</option>
+              <option value="604800">Last 7 days</option>
+              <option value="2592000">Last 30 days</option>
+            </select>
+          </label>
+        </form>
+
+        <div class="chart-block">
+          <h3>Sessions started / ended</h3>
+          <div id="chart-sessions" class="chart"></div>
+        </div>
+
+        <div class="chart-block">
+          <h3>Messages received</h3>
+          <div class="filters">
+            <label><input type="radio" name="rx-transport" value="both" checked> Both</label>
+            <label><input type="radio" name="rx-transport" value="dm"> DM</label>
+            <label><input type="radio" name="rx-transport" value="channel"> Channel</label>
+          </div>
+          <div id="chart-rx" class="chart"></div>
+        </div>
+
+        <div class="chart-block">
+          <h3>Messages sent</h3>
+          <div class="filters">
+            <label><input type="radio" name="tx-transport" value="both" checked> Both</label>
+            <label><input type="radio" name="tx-transport" value="dm"> DM</label>
+            <label><input type="radio" name="tx-transport" value="channel"> Channel</label>
+          </div>
+          <div id="chart-tx" class="chart"></div>
+        </div>
+      </section>
+
+      <section id="tab-players" class="tab-panel" hidden>
+        <h2>Players</h2>
+        <table id="players-table">
+          <thead>
+            <tr>
+              <th data-sort="name">Name</th>
+              <th data-sort="last_active">Last active</th>
+              <th data-sort="first_active">First active</th>
+              <th data-sort="sessions">Sessions</th>
+              <th data-sort="messages_rx">Msgs recv</th>
+              <th data-sort="messages_tx">Msgs sent</th>
+              <th>Pubkey</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section id="tab-settings" class="tab-panel" hidden>
+        <h2>Settings</h2>
+        <form id="settings-password-form" class="login-card inline">
+          <h3>Change password</h3>
+          <label>Current password<input id="set-pw-current" type="password" autocomplete="current-password" required></label>
+          <label>New password<input id="set-pw-new" type="password" autocomplete="new-password" minlength="12" required></label>
+          <label>Confirm new password<input id="set-pw-confirm" type="password" autocomplete="new-password" minlength="12" required></label>
+          <p id="settings-password-error" class="error" hidden></p>
+          <p id="settings-password-success" class="success" hidden>Password changed.</p>
+          <button type="submit">Change password</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

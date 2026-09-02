@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Callable
 
 from zorkbot.addressing import parse_command, strip_address
 from zorkbot.advertiser import Advertiser
@@ -24,6 +25,7 @@ from zorkbot.commands.zork import (
     _HELP_PACKETS_IN_SESSION,
     handle_game_command,
 )
+from zorkbot.admin.events import EventSink, NullEventSink
 from zorkbot.config import BotConfig
 from zorkbot.context import Context, IncomingMessage, ReplyFunc
 from zorkbot.game_client import GameClient
@@ -51,14 +53,17 @@ class ZorkBot:
         game: GameClient,
         advertiser: Advertiser,
         meshcore: object,
+        event_sink: EventSink | None = None,
     ) -> None:
         self.config = config
         self.game = game
         self.advertiser = advertiser
         self.meshcore = meshcore
+        self._sink = event_sink or NullEventSink()
 
         self._state = SessionState(
             max_watchers_per_session=config.max_watchers_per_session,
+            event_sink=self._sink,
         )
         self._rate_limiter = RateLimiter(config.rate_limit_seconds)
 
@@ -74,13 +79,29 @@ class ZorkBot:
 
         # Injected by the runner after construction.
         self._send_dm: ReplyFunc | None = None
+        self._send_queue_depth_getter: Callable[[], int | None] = lambda: None
 
     @property
     def name(self) -> str:
         return self.config.name
 
+    @property
+    def session_state(self) -> SessionState:
+        return self._state
+
+    @property
+    def event_sink(self) -> EventSink:
+        return self._sink
+
+    @property
+    def send_queue_depth(self) -> int | None:
+        return self._send_queue_depth_getter()
+
     def set_send_dm(self, func: ReplyFunc) -> None:
         self._send_dm = func
+
+    def set_send_queue_depth_getter(self, func: Callable[[], int | None]) -> None:
+        self._send_queue_depth_getter = func
 
     def start_session_poller(self) -> None:
         """Start polling the game service for sessions it ended server-side
@@ -106,7 +127,7 @@ class ZorkBot:
         for record in self._state.all_sessions():
             if record.player_id in server_player_ids:
                 continue
-            self._state.remove_session(record.player_id)
+            self._state.remove_session(record.player_id, reason="server_side")
             logger.info(
                 "session=%d player=%s ended server-side — notifying %d watcher(s)",
                 record.num, record.player_id[:8], len(record.watchers),
@@ -129,10 +150,20 @@ class ZorkBot:
         command, _, rest_args = args.partition(" ")
         command = command.lower()
 
-        if not await self._rate_check(message, reply):
+        if not await self._rate_check(
+            message, reply, command=command, transport="channel", channel_idx=message.channel_idx
+        ):
             return
 
         if command not in _LOBBY_COMMANDS:
+            self._sink.command(
+                pubkey_prefix=message.pubkey_prefix,
+                command=command,
+                transport="channel",
+                channel_idx=message.channel_idx,
+                accepted=False,
+                reject_reason="not_in_lobby",
+            )
             await reply("Send !start and then DM me to play.")
             return
 
@@ -162,12 +193,22 @@ class ZorkBot:
             return
 
         command, _, _rest_args = args.partition(" ")
-        if command.lower() != "bots":
+        command = command.lower()
+        if command != "bots":
             return
 
-        if not await self._rate_check(message, reply):
+        if not await self._rate_check(
+            message, reply, command=command, transport="bots_channel", channel_idx=message.channel_idx
+        ):
             return
 
+        self._sink.command(
+            pubkey_prefix=message.pubkey_prefix,
+            command=command,
+            transport="bots_channel",
+            channel_idx=message.channel_idx,
+            accepted=True,
+        )
         ctx = Context(
             message=message,
             args=args,
@@ -182,9 +223,6 @@ class ZorkBot:
         if not text:
             return
 
-        if not await self._rate_check(message, reply):
-            return
-
         rest, _mentioned = strip_address(text, self.name)
 
         args = parse_command(rest)
@@ -196,6 +234,9 @@ class ZorkBot:
             command = "_game"
             rest_args = rest.strip()
 
+        if not await self._rate_check(message, reply, command=command, transport="dm"):
+            return
+
         ctx = Context(
             message=message,
             args=rest,
@@ -204,7 +245,15 @@ class ZorkBot:
         )
         await self._enqueue(ctx, command, rest_args, reply)
 
-    async def _rate_check(self, message: IncomingMessage, reply: ReplyFunc) -> bool:
+    async def _rate_check(
+        self,
+        message: IncomingMessage,
+        reply: ReplyFunc,
+        *,
+        command: str = "?",
+        transport: str = "dm",
+        channel_idx: int | None = None,
+    ) -> bool:
         exempt = bool(
             message.pubkey_prefix
             and message.pubkey_prefix.lower() in self.config.admin_pubkeys
@@ -214,6 +263,14 @@ class ZorkBot:
                 "rate limited player=%s: %r",
                 (message.pubkey_prefix or "?")[:8],
                 message.text,
+            )
+            self._sink.command(
+                pubkey_prefix=message.pubkey_prefix,
+                command=command,
+                transport=transport,
+                channel_idx=channel_idx,
+                accepted=False,
+                reject_reason="rate_limited",
             )
             await reply(RATE_LIMIT_REPLY)
             return False
@@ -233,6 +290,14 @@ class ZorkBot:
         except asyncio.QueueFull:
             logger.info(
                 "queue full for player=%s, rejecting: %r", player_id[:8], ctx.message.text
+            )
+            self._sink.command(
+                pubkey_prefix=ctx.pubkey_prefix,
+                command=command,
+                transport="dm" if ctx.is_dm else "channel",
+                channel_idx=None if ctx.is_dm else ctx.message.channel_idx,
+                accepted=False,
+                reject_reason="queue_full",
             )
             await reply(BUSY_REPLY)
             return
@@ -271,6 +336,14 @@ class ZorkBot:
                 queue.task_done()
 
     async def _handle(self, ctx: Context, command: str, rest_args: str) -> None:
+        self._sink.command(
+            pubkey_prefix=ctx.pubkey_prefix,
+            command=command,
+            transport="dm" if ctx.is_dm else "channel",
+            channel_idx=None if ctx.is_dm else ctx.message.channel_idx,
+            accepted=True,
+        )
+
         async def send_dm(pubkey_prefix: str, text: str) -> None:
             if self._send_dm:
                 await self._send_dm(pubkey_prefix, text)
@@ -346,6 +419,10 @@ class ZorkBot:
             await q.join()
 
     async def stop(self) -> None:
+        # Close out session-history rows so they don't read as still-active
+        # forever — the game service keeps the actual saves/PTYs regardless.
+        for record in list(self._state.all_sessions()):
+            self._state.remove_session(record.player_id, reason="shutdown")
         for task in self._workers.values():
             task.cancel()
         for task in self._background_tasks:

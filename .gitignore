@@ -4,6 +4,8 @@ games/*.z3
 # Runtime data
 data/saves/*
 !data/saves/.gitkeep
+data/admin/*
+!data/admin/.gitkeep
 
 # Local bot config (copy from zorkbot.toml.example)
 zorkbot/zorkbot.toml

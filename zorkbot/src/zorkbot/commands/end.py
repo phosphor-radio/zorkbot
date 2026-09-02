@@ -43,7 +43,7 @@ async def handle_end(
         return
 
     if active == "playing":
-        record = state.remove_session(player_id)
+        record = state.remove_session(player_id, reason="player_end")
         num = record.num if record else "?"
         try:
             await game.end_session(player_id)
@@ -81,7 +81,7 @@ async def _handle_admin_end(
         return
 
     target_id = record.player_id
-    state.remove_session(target_id)
+    state.remove_session(target_id, reason="admin_end")
     try:
         await game.end_session(target_id)
     except (GameServiceError, SessionNotFoundError) as exc:

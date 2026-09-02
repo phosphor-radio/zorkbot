@@ -23,7 +23,7 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
         return
 
     # Remove any existing session from state (no end_session call; reset handles it).
-    record = state.remove_session(player_id)
+    record = state.remove_session(player_id, reason="reset")
     old_num = record.num if record else None
 
     player_name = ctx.sender_name or player_id[:8]
