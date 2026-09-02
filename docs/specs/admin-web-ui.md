@@ -1,11 +1,31 @@
 # Administrative Web UI
 
-**Status:** Draft — not implemented
+**Status:** Implemented (branch `spec/admin-web-ui`, not yet merged) — see [Deviations from this spec](#deviations-from-this-spec)
 **Supersedes:** the "Management web UI" line under Future Work in [`dm-sessions.md`](dm-sessions.md)
 
 A LAN-accessible single-operator web console for monitoring zorkbot: live sessions and watchers,
 session history, message/session/command graphs, and per-player statistics. Backed by a small
 OAuth2-protected HTTP API and a SQLite event log embedded in the existing `zorkbot` process.
+
+---
+
+## Deviations from this spec
+
+Implementation matches this spec except for two points, both called out inline where they occur:
+
+- **Charts** ([Frontend](#frontend)): a hand-rolled inline-SVG line renderer instead of vendoring
+  uPlot. Three time-series views didn't justify a dependency; revisit if the chart surface grows.
+- **`session_started()` upserts its own player row** ([Event instrumentation](#event-instrumentation)):
+  found via manual end-to-end testing — the CLI `--simulate` path drives the bot directly and never
+  goes through `runner.py`'s message handlers, so `player_seen()` never ran before `!start`, which
+  tripped the `sessions.pubkey_prefix → players` foreign key. `session_started()` now upserts the
+  player row itself instead of depending on call-order across modules, which also removes that
+  fragility from the real MeshCore runner path.
+
+Everything else — schema, API surface, auth flow, config keys, file layout — was built as specified.
+206 tests pass (170 pre-existing + 36 new); the full flow (login, forced password change, live SSE
+watch against real game output, history, charts, players) was also verified manually in a browser
+against the simulator. Not yet merged to `main`.
 
 ---
 
