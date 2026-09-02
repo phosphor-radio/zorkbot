@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 
+from zorkbot.admin import AdminUIServer
 from zorkbot.advertiser import Advertiser
 from zorkbot.bot import ZorkBot
 from zorkbot.config import load_config
@@ -45,6 +46,9 @@ async def run(args: argparse.Namespace) -> None:
     if args.name:
         config.name = args.name
 
+    admin_server = AdminUIServer(config.admin_ui) if config.admin_ui.enabled else None
+    event_sink = admin_server.sink if admin_server else None
+
     async with GameClient(config.game_url) as game:
         if args.simulate:
             # In simulate mode we don't have a real meshcore object,
@@ -54,11 +58,15 @@ async def run(args: argparse.Namespace) -> None:
                 interval_seconds=config.advert_interval_seconds,
                 cooldown_seconds=config.advert_cooldown_seconds,
             )
-            bot = ZorkBot(config, game, advertiser, meshcore)
+            bot = ZorkBot(config, game, advertiser, meshcore, event_sink=event_sink)
+            if admin_server:
+                await admin_server.start(bot)
             try:
                 await Simulator(bot).repl()
             finally:
                 await bot.stop()
+                if admin_server:
+                    await admin_server.stop()
             return
 
         meshcore = await connect(
@@ -83,12 +91,16 @@ async def run(args: argparse.Namespace) -> None:
                 interval_seconds=config.advert_interval_seconds,
                 cooldown_seconds=config.advert_cooldown_seconds,
             )
-            bot = ZorkBot(config, game, advertiser, meshcore)
+            bot = ZorkBot(config, game, advertiser, meshcore, event_sink=event_sink)
+            if admin_server:
+                await admin_server.start(bot)
             runner = MeshCoreRunner(bot, meshcore)
             try:
                 await runner.run_forever()
             finally:
                 await runner.bot.stop()
+                if admin_server:
+                    await admin_server.stop()
         finally:
             await meshcore.disconnect()
 

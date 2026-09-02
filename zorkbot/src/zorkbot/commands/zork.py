@@ -102,7 +102,7 @@ async def handle_game_command(
         result = await game.command(player_id, command_text)
     except SessionNotFoundError:
         # Session was ended server-side (e.g. inactivity timeout).
-        state.remove_session(player_id)
+        state.remove_session(player_id, reason="server_side")
         await ctx.reply(
             "Your session has ended due to inactivity. Send !start to resume."
         )
@@ -120,6 +120,13 @@ async def handle_game_command(
         return
 
     output = result.output
+    state.event_sink.transcript(
+        session_num=record.num,
+        player_name=record.player_name,
+        command=command_text,
+        output=output,
+    )
+
     packets = packetize(output, max_chars=ctx.config.packet_max_chars)
     if not packets:
         return

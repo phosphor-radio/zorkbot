@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from zorkbot.admin.events import EventSink
 
 
 @dataclass
@@ -21,7 +24,14 @@ class SessionRecord:
     num: int
     player_id: str
     player_name: str
+    # Monotonic clock — correct for duration math even across a wall-clock
+    # step. Never persist this; see started_wall_at for that.
     started_at: float = field(default_factory=time.monotonic)
+    # Wall clock (Unix seconds) at start — what the admin UI persists and
+    # displays. Kept alongside started_at rather than instead of it: mixing
+    # the two (durations from wall clock, timestamps from monotonic) is the
+    # easiest bug to write here.
+    started_wall_at: float = field(default_factory=time.time)
     # pubkey_prefixes of current watchers for this session.
     watchers: set[str] = field(default_factory=set)
 
@@ -36,8 +46,17 @@ class SessionState:
     - max_watchers_per_session limits observers per session.
     """
 
-    def __init__(self, max_watchers_per_session: int = 2) -> None:
+    def __init__(
+        self,
+        max_watchers_per_session: int = 2,
+        event_sink: "EventSink | None" = None,
+    ) -> None:
         self._max_watchers = max_watchers_per_session
+        if event_sink is None:
+            from zorkbot.admin.events import NullEventSink
+
+            event_sink = NullEventSink()
+        self._sink = event_sink
         # player_id → SessionRecord (playing sessions)
         self._sessions: dict[str, SessionRecord] = {}
         # session_num → player_id (reverse index)
@@ -45,6 +64,10 @@ class SessionState:
         # player_id → session_num being watched
         self._watching: dict[str, int] = {}
         self._next_num: int = 1
+
+    @property
+    def event_sink(self) -> "EventSink":
+        return self._sink
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -58,16 +81,24 @@ class SessionState:
         record = SessionRecord(num=num, player_id=player_id, player_name=player_name)
         self._sessions[player_id] = record
         self._num_to_player[num] = player_id
+        self._sink.session_started(record)
         return record
 
-    def remove_session(self, player_id: str) -> Optional[SessionRecord]:
-        """Remove and return the session record for player_id, or None."""
+    def remove_session(
+        self, player_id: str, reason: str = "unknown"
+    ) -> Optional[SessionRecord]:
+        """Remove and return the session record for player_id, or None.
+
+        *reason* is one of player_end | admin_end | reset | server_side |
+        shutdown — recorded as the admin UI's session-history end_reason.
+        """
         record = self._sessions.pop(player_id, None)
         if record is not None:
             self._num_to_player.pop(record.num, None)
             # Remove all watchers whose watch target no longer exists.
             for watcher_id in list(record.watchers):
                 self._watching.pop(watcher_id, None)
+            self._sink.session_ended(record, reason)
         return record
 
     def get_session(self, player_id: str) -> Optional[SessionRecord]:
@@ -101,6 +132,7 @@ class SessionState:
             return f"Zork I Session #{session_num} already has the maximum number of watchers."
         record.watchers.add(watcher_id)
         self._watching[watcher_id] = session_num
+        self._sink.watchers_changed(record)
         return None
 
     def remove_watcher(self, watcher_id: str) -> Optional[int]:
@@ -113,6 +145,7 @@ class SessionState:
             record = self.get_session_by_num(session_num)
             if record is not None:
                 record.watchers.discard(watcher_id)
+                self._sink.watchers_changed(record)
         return session_num
 
     def watching_session(self, watcher_id: str) -> Optional[int]:

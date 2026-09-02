@@ -464,9 +464,13 @@ Single-page vanilla JavaScript, no build step, served by the same app from
 `zorkbot/src/zorkbot/admin/static/`. This matches the project's existing tooling profile — there is
 no JS toolchain in the repo today and adding one to render five views is not a good trade.
 
-Charts use **uPlot** (MIT, ~45 KB), **vendored into the repo** rather than loaded from a CDN: a Pi
-on a mesh deployment may have no internet at all, and the CSP below forbids remote scripts anyway.
-Add the attribution to `NOTICES.md`.
+Charts use a small hand-rolled inline-SVG line renderer (~80 lines in `app.js`) rather than a
+vendored charting library: three time-series views don't justify a dependency, hand-rolled avoids
+an attribution entry and a vendored-file update path, and it sidesteps needing network access to
+fetch a library during implementation. Revisit if the chart views grow materially (stacked/derived
+series, zoom/pan, tooltips) — at that point vendoring something like uPlot (MIT, ~45 KB) becomes
+the better trade; the CSP already forbids remote script sources either way, so it would still need
+to be vendored, not CDN-loaded.
 
 Views:
 
@@ -560,7 +564,7 @@ The container healthcheck stays `pgrep`-based — it must keep working when the 
 | `src/zorkbot/admin/events.py` | `EventSink` protocol, `NullEventSink`, `SqliteEventSink` |
 | `src/zorkbot/admin/bus.py` | `SessionBus`: per-session subscriber fan-out + ring buffer |
 | `src/zorkbot/admin/routes/*.py` | `auth`, `sessions`, `stats`, `players`, `meta` |
-| `src/zorkbot/admin/static/` | `index.html`, `app.js`, `app.css`, vendored `uPlot` |
+| `src/zorkbot/admin/static/` | `index.html`, `app.js` (incl. the inline-SVG chart renderer), `app.css` |
 
 ### Modified files
 

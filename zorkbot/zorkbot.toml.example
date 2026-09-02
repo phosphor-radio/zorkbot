@@ -44,3 +44,19 @@ name = "#zork"
 # 12-char hex pubkey_prefix of admin users.
 # Find yours in bot logs: docker compose logs zorkbot | grep player=
 pubkeys = ["your-pubkey-prefix"]
+
+# Admin web UI: LAN-accessible session monitoring + admin console, off by
+# default. See "Admin web UI" in README.md before enabling. First login is
+# admin / zorkbot-admin! and forces a password change. This is plaintext
+# HTTP — keep it on a trusted LAN or front it with TLS / a VPN.
+[admin_ui]
+# enabled = false
+# bind = "0.0.0.0"                  # "127.0.0.1" to restrict to the host
+# port = 8081
+# db_path = "/data/admin.db"
+# access_token_ttl_seconds = 1800
+# refresh_token_ttl_seconds = 2592000
+# event_retention_days = 90
+# event_queue_size = 1024
+# live_buffer_events = 50
+# max_live_streams = 4

@@ -36,8 +36,12 @@ services:
       - ${MESHCORE_GROUP_GID:-20}
     volumes:
       - ${ZORKBOT_CONFIG:-./zorkbot/zorkbot.toml}:/app/zorkbot.toml:ro
+      - ./data/admin:/data
+    ports:
+      - "${ADMIN_UI_PORT:-8081}:8081"
     environment:
       GAME_URL: http://game:8080
+      ADMIN_UI_ENABLED: ${ADMIN_UI_ENABLED:-false}
     command:
       - --serial
       - ${MESHCORE_CONTAINER_DEVICE:-/dev/meshcore}
