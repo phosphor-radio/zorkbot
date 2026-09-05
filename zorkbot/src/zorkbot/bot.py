@@ -269,7 +269,8 @@ class ZorkBot:
             message.pubkey_prefix
             and message.pubkey_prefix.lower() in self.config.admin_pubkeys
         )
-        if not self._rate_limiter.allow(message.pubkey_prefix, exempt=exempt):
+        decision = self._rate_limiter.check(message.pubkey_prefix, exempt=exempt)
+        if not decision.allowed:
             logger.info(
                 "rate limited player=%s: %r",
                 (message.pubkey_prefix or "?")[:8],
@@ -283,7 +284,9 @@ class ZorkBot:
                 accepted=False,
                 reject_reason="rate_limited",
             )
-            await reply(RATE_LIMIT_REPLY)
+            # Only the first rejection of a burst earns a reply — see Decision.
+            if decision.notify:
+                await reply(RATE_LIMIT_REPLY)
             return False
         return True
 

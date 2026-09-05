@@ -71,8 +71,21 @@ class BotConfig:
     announce_on_start: bool = False
     command_queue_size: int = 8
 
-    # Rate limiting
-    rate_limit_seconds: float = 3.0
+    # Rate limiting. Admission control: caps how many packets a single sender can
+    # cause to be generated. Distinct from send_spacing_seconds, which only paces
+    # how fast already-generated packets leave the radio.
+    #
+    # Keep this at or above the airtime one command costs, otherwise it admits
+    # work faster than the radio can drain it and the real limiter becomes
+    # max_send_queue_depth overflow — which drops other players' replies too:
+    #
+    #     rate_limit_seconds >= packets_per_reply * send_spacing_seconds
+    #
+    # A room description is ~2 packets, so 4s unwatched, and 12s with the default
+    # 2 watchers (the reply is re-sent to each). 8.0 sits between the two: a
+    # player cannot outrun the radio, but ordinary play is not throttled, since
+    # the reply itself takes that long to transmit anyway.
+    rate_limit_seconds: float = 8.0
 
     # Session management
     max_watchers_per_session: int = 2

@@ -373,7 +373,7 @@ game_url = "http://game:8080"   # Docker; use http://localhost:8080 for local de
 
 packet_max_chars = 120          # max chars per outgoing radio message
 announce_on_start = false
-rate_limit_seconds = 3.0
+rate_limit_seconds = 8.0        # min gap between commands from one sender
 
 # Session management
 max_watchers_per_session = 2    # observers per session
@@ -413,6 +413,38 @@ enabled = false
 # bind = "0.0.0.0"
 # port = 8081
 ```
+
+#### Throttling: `rate_limit_seconds` vs `send_spacing_seconds`
+
+These look redundant and are not. They act on different things, and the bot needs
+both.
+
+| | `rate_limit_seconds` | `send_spacing_seconds` |
+| --- | --- | --- |
+| Controls | how many packets get **created** | how fast they **leave** |
+| Scope | per sender | global |
+| Position | admission, upstream | egress, downstream |
+
+`send_spacing_seconds` never reduces the packet count — it only spreads
+transmissions out. `rate_limit_seconds` is the only thing that stops one sender
+from generating unbounded work, which matters because the send queue is shared:
+once it hits `max_send_queue_depth` the overflow drops are indiscriminate and
+take other players' replies with them.
+
+Set `rate_limit_seconds` at or above the airtime a single reply costs:
+
+```
+rate_limit_seconds >= packets_per_reply * send_spacing_seconds
+```
+
+A room description is roughly 2 packets at `packet_max_chars = 120`, so 4s for an
+unwatched session and 12s with the default 2 watchers, since the reply is re-sent
+to each. **A value below that is close to useless** — it admits commands faster
+than the radio can drain them, and send-queue overflow becomes the real limit.
+
+A throttled sender gets one "slow down" reply per burst, not one per message.
+Each reply occupies a transmit slot of its own, so replying to every message
+would let one sender monopolise the radio — the opposite of the point.
 
 ## Admin access
 

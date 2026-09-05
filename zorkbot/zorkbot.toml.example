@@ -8,7 +8,14 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 # packet_max_chars = 120        # max chars per outgoing radio message
 # log_level = "INFO"
 # announce_on_start = false
-# rate_limit_seconds = 3.0
+
+# Minimum gap between commands from one sender. This is admission control —
+# it limits how many packets a sender can cause. Keep it at or above the
+# airtime of a single reply, or it admits work faster than the radio drains it
+# and send-queue overflow (which drops other players' packets) becomes the real
+# limit:  rate_limit_seconds >= packets_per_reply * send_spacing_seconds
+# A room description is ~2 packets: 4s unwatched, 12s with 2 watchers.
+# rate_limit_seconds = 8.0
 
 # Session management
 # max_watchers_per_session = 2      # observers allowed per session
@@ -26,7 +33,9 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 # advert_cooldown_seconds = 300     # min gap between adverts
 
 # RF send serialization
-# send_spacing_seconds = 2.0        # min gap between radio transmissions
+# send_spacing_seconds = 2.0        # min gap between radio transmissions;
+#                                   # paces egress, does not reduce packet
+#                                   # count — see rate_limit_seconds above
 # max_send_queue_depth = 64         # max queued packets before drops
 
 # Mesh bot discovery (!bots roll call) — a separate channel from the game

@@ -830,6 +830,29 @@ async def test_rate_limiting() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_burst_replies_once() -> None:
+    """A burst must draw exactly one "Slow down", not one per message.
+
+    Every reply goes out through the runner's global send gate, spaced by
+    send_spacing_seconds, so replying to each message of a burst would hand one
+    sender that many consecutive transmit slots and starve every other player.
+    """
+    config = BotConfig(rate_limit_seconds=60.0)
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        for _ in range(10):
+            await bot.dispatch_dm(_dm_message("!help"), reply)
+            await bot.drain()
+
+    assert sum("Slow down" in r for r in replies) == 1
+
+
+@pytest.mark.asyncio
 async def test_start_on_channel_without_contact_redirects() -> None:
     config = BotConfig()
     # Simulate player not in contacts.
