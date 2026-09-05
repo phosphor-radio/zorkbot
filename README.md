@@ -373,7 +373,6 @@ game_url = "http://game:8080"   # Docker; use http://localhost:8080 for local de
 
 packet_max_chars = 120          # max chars per outgoing radio message
 announce_on_start = false
-rate_limit_seconds = 3.0
 
 # Session management
 max_watchers_per_session = 2    # observers per session
@@ -396,6 +395,7 @@ max_send_queue_depth = 64       # max queued packets before drops
 # lobby below. Disabled by default; requires both bots_enabled and
 # [bots_channel] to be set.
 bots_enabled = false
+bots_cooldown_seconds = 12.0    # min gap between !bots roll-call replies
 [bots_channel]
 index = 2
 name = "#bots"
@@ -413,6 +413,41 @@ enabled = false
 # bind = "0.0.0.0"
 # port = 8081
 ```
+
+#### Throttling
+
+The bot never answers a flood. There is no "slow down" message, because sending
+one would defeat the purpose: every packet the bot emits takes a
+`send_spacing_seconds` transmit slot from a queue shared by all players, so a
+throttle notice costs the mesh as much as the reply it stands in for.
+
+Instead, a command is dropped in silence if that player's **previous response is
+still being transmitted**. The condition is state, not elapsed time, and that
+distinction is the whole point:
+
+- A player who waits to see their reply before typing the next command is
+  *never* throttled, no matter how fast they are. There is no window to fall
+  foul of.
+- A sender firing commands ahead of the replies — a spammer, or someone typing
+  blind — has everything after the first dropped, and costs the mesh nothing.
+
+Per-player work is therefore capped at one in-flight command, so total demand
+scales with the number of *active players* rather than with how fast anyone
+types. `send_spacing_seconds` then paces what actually goes out, and
+`max_send_queue_depth` overflow becomes a genuine last resort instead of the
+de-facto limiter.
+
+**`!end` is exempt.** It is a player's only way to stop a runaway session, so it
+is queued behind the in-flight response rather than dropped. One interrupt may
+wait; further ones are dropped, so `!end` cannot be used to walk through the
+gate. Note that it does not truncate a response already being transmitted — it
+takes effect once that finishes.
+
+`!bots` is gated separately by `bots_cooldown_seconds`, since a roll call is a
+broadcast with no per-player response to wait on. That cooldown is global: many
+players asking at once draw one reply for the channel. It must stay above the
+5–10s collision-avoidance delay in `handle_bots`, or a second roll call is
+admitted while the first reply is still waiting to transmit.
 
 ## Admin access
 

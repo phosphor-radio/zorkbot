@@ -8,7 +8,6 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 # packet_max_chars = 120        # max chars per outgoing radio message
 # log_level = "INFO"
 # announce_on_start = false
-# rate_limit_seconds = 3.0
 
 # Session management
 # max_watchers_per_session = 2      # observers allowed per session
@@ -32,6 +31,9 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 # Mesh bot discovery (!bots roll call) — a separate channel from the game
 # lobby below. Disabled by default; requires both of these to be set.
 # bots_enabled = false
+# bots_cooldown_seconds = 12.0      # min gap between roll-call replies; global,
+#                                   # not per-sender. Must stay above the 5-10s
+#                                   # collision-avoidance delay in handle_bots.
 # [bots_channel]
 # index = 2
 # name = "#bots"

@@ -24,8 +24,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "log_level",
     "packet_max_chars",
     "announce_on_start",
-    "command_queue_size",
-    "rate_limit_seconds",
+    "bots_cooldown_seconds",
     "max_watchers_per_session",
     "advert_enabled",
     "advert_flood",
@@ -69,10 +68,6 @@ class BotConfig:
     log_level: str | None = None
     packet_max_chars: int = 120
     announce_on_start: bool = False
-    command_queue_size: int = 8
-
-    # Rate limiting
-    rate_limit_seconds: float = 3.0
 
     # Session management
     max_watchers_per_session: int = 2
@@ -96,6 +91,12 @@ class BotConfig:
     # [bots_channel] section is configured and this is set.
     bots_enabled: bool = False
     bots_channel: ChannelConfig | None = None
+    # Minimum gap between !bots roll-call replies. Global, not per-sender: the
+    # reply is a broadcast, so several players asking at once should draw one
+    # answer for the channel. Must exceed handle_bots' collision-avoidance delay
+    # (REPLY_DELAY_BASE + JITTER = 10s), otherwise a second roll call is admitted
+    # while the first reply is still waiting to transmit.
+    bots_cooldown_seconds: float = 12.0
 
     @property
     def admin_pubkeys(self) -> frozenset[str]:
@@ -145,10 +146,6 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
     announce_on_start = _root_value(data, channel, admin, "announce_on_start")
     if announce_on_start is not None:
         config.announce_on_start = bool(announce_on_start)
-    if command_queue_size := _root_value(data, channel, admin, "command_queue_size"):
-        config.command_queue_size = int(command_queue_size)
-    if rate_limit_seconds := _root_value(data, channel, admin, "rate_limit_seconds"):
-        config.rate_limit_seconds = float(rate_limit_seconds)
     if max_watchers_per_session := _root_value(data, channel, admin, "max_watchers_per_session"):
         config.max_watchers_per_session = int(max_watchers_per_session)
     session_poll_seconds = _root_value(data, channel, admin, "session_poll_seconds")
@@ -173,6 +170,11 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         bots_enabled = bots_channel.get("bots_enabled")
     if bots_enabled is not None:
         config.bots_enabled = bool(bots_enabled)
+    bots_cooldown_seconds = _root_value(data, channel, admin, "bots_cooldown_seconds")
+    if bots_cooldown_seconds is None:
+        bots_cooldown_seconds = bots_channel.get("bots_cooldown_seconds")
+    if bots_cooldown_seconds is not None:
+        config.bots_cooldown_seconds = float(bots_cooldown_seconds)
 
     if channel:
         config.channel = ChannelConfig(
