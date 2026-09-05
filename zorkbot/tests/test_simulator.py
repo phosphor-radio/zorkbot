@@ -74,7 +74,7 @@ async def test_simulator_start_channel_shows_dm() -> None:
     """!start on channel should show both the channel ack and the DM intro."""
     import httpx
 
-    config = BotConfig(game_url="http://game:8080", rate_limit_seconds=0.0)
+    config = BotConfig(game_url="http://game:8080")
     respx.post("http://game:8080/sessions").mock(
         return_value=httpx.Response(200, json={"ok": True})
     )

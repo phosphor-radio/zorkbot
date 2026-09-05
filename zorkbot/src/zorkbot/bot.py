@@ -29,14 +29,16 @@ from zorkbot.admin.events import EventSink, NullEventSink
 from zorkbot.config import BotConfig
 from zorkbot.context import Context, IncomingMessage, ReplyFunc
 from zorkbot.game_client import GameClient
-from zorkbot.rate_limit import RateLimiter
+from zorkbot.cooldown import Cooldown
 from zorkbot.session_state import SessionState
 from zorkbot.watcher_notify import notify_watchers_session_ended
 
 logger = logging.getLogger(__name__)
 
-BUSY_REPLY = "The bot is busy, try again."
-RATE_LIMIT_REPLY = "Slow down — try again in a moment."
+# Commands allowed through while a player's previous response is still being
+# transmitted. !end is how a player stops a runaway session, so dropping it
+# would leave them with no way out until the session times out on its own.
+_INTERRUPT_COMMANDS = frozenset({"end"})
 
 # Commands accepted from the #zork channel (lobby). !bots is deliberately
 # excluded — it's only reachable from the separate bots-discovery channel.
@@ -65,7 +67,7 @@ class ZorkBot:
             max_watchers_per_session=config.max_watchers_per_session,
             event_sink=self._sink,
         )
-        self._rate_limiter = RateLimiter(config.rate_limit_seconds)
+        self._bots_cooldown = Cooldown(config.bots_cooldown_seconds)
 
         # Per-player asyncio queues: pubkey_prefix → asyncio.Queue
         self._queues: dict[str, asyncio.Queue] = {}
@@ -161,11 +163,6 @@ class ZorkBot:
         command, _, rest_args = args.partition(" ")
         command = command.lower()
 
-        if not await self._rate_check(
-            message, reply, command=command, transport="channel", channel_idx=message.channel_idx
-        ):
-            return
-
         if command not in _LOBBY_COMMANDS:
             self._sink.command(
                 pubkey_prefix=message.pubkey_prefix,
@@ -184,7 +181,7 @@ class ZorkBot:
             _reply=reply,
             config=self.config,
         )
-        await self._enqueue(ctx, command, rest_args, reply)
+        self._enqueue(ctx, command, rest_args)
 
     async def dispatch_bots_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
         """Handle a message from the dedicated bots-discovery channel.
@@ -208,9 +205,20 @@ class ZorkBot:
         if command != "bots":
             return
 
-        if not await self._rate_check(
-            message, reply, command=command, transport="bots_channel", channel_idx=message.channel_idx
-        ):
+        # Roll calls are answered at most once per window, for the channel as a
+        # whole. Extra requests are dropped in silence — see Cooldown.
+        if not self._bots_cooldown.claim():
+            logger.info(
+                "dropped (bots_cooldown) player=%s", (message.pubkey_prefix or "?")[:8]
+            )
+            self._sink.command(
+                pubkey_prefix=message.pubkey_prefix,
+                command=command,
+                transport="bots_channel",
+                channel_idx=message.channel_idx,
+                accepted=False,
+                reject_reason="bots_cooldown",
+            )
             return
 
         self._sink.command(
@@ -245,72 +253,61 @@ class ZorkBot:
             command = "_game"
             rest_args = rest.strip()
 
-        if not await self._rate_check(message, reply, command=command, transport="dm"):
-            return
-
         ctx = Context(
             message=message,
             args=rest,
             _reply=reply,
             config=self.config,
         )
-        await self._enqueue(ctx, command, rest_args, reply)
+        self._enqueue(ctx, command, rest_args)
 
-    async def _rate_check(
-        self,
-        message: IncomingMessage,
-        reply: ReplyFunc,
-        *,
-        command: str = "?",
-        transport: str = "dm",
-        channel_idx: int | None = None,
-    ) -> bool:
-        exempt = bool(
-            message.pubkey_prefix
-            and message.pubkey_prefix.lower() in self.config.admin_pubkeys
+    def _drop(self, ctx: Context, command: str, reason: str) -> None:
+        """Record a dropped command and deliberately send nothing back.
+
+        Answering would defeat the purpose: every packet the bot emits takes a
+        send_spacing_seconds transmit slot from a queue shared by all players,
+        so a "slow down" notice costs the mesh as much as the reply it stands
+        in for.
+        """
+        logger.info(
+            "dropped (%s) player=%s: %r",
+            reason,
+            (ctx.pubkey_prefix or "?")[:8],
+            ctx.message.text,
         )
-        if not self._rate_limiter.allow(message.pubkey_prefix, exempt=exempt):
-            logger.info(
-                "rate limited player=%s: %r",
-                (message.pubkey_prefix or "?")[:8],
-                message.text,
-            )
-            self._sink.command(
-                pubkey_prefix=message.pubkey_prefix,
-                command=command,
-                transport=transport,
-                channel_idx=channel_idx,
-                accepted=False,
-                reject_reason="rate_limited",
-            )
-            await reply(RATE_LIMIT_REPLY)
-            return False
-        return True
+        self._sink.command(
+            pubkey_prefix=ctx.pubkey_prefix,
+            command=command,
+            transport="dm" if ctx.is_dm else "channel",
+            channel_idx=None if ctx.is_dm else ctx.message.channel_idx,
+            accepted=False,
+            reject_reason=reason,
+        )
 
-    async def _enqueue(
-        self, ctx: Context, command: str, rest_args: str, reply: ReplyFunc
-    ) -> None:
+    def _enqueue(self, ctx: Context, command: str, rest_args: str) -> None:
         player_id = ctx.pubkey_prefix or "anon"
 
+        # Drop whatever arrives while this player's previous response is still
+        # going out. The gate is state, not elapsed time, so a player who waits
+        # for their reply is never caught by it — only someone typing ahead of
+        # one, which is what a spammer does and a person reading the game does
+        # not. The bot's output rate is then governed by send_spacing_seconds.
+        worker = self._workers.get(player_id)
+        if worker is not None and not worker.done() and command not in _INTERRUPT_COMMANDS:
+            self._drop(ctx, command, "response_pending")
+            return
+
         if player_id not in self._queues:
-            self._queues[player_id] = asyncio.Queue(maxsize=self.config.command_queue_size)
+            # Depth 1: the worker holds the command being answered, leaving room
+            # for a single queued interrupt behind it.
+            self._queues[player_id] = asyncio.Queue(maxsize=1)
 
         queue = self._queues[player_id]
         try:
             queue.put_nowait((ctx, command, rest_args))
         except asyncio.QueueFull:
-            logger.info(
-                "queue full for player=%s, rejecting: %r", player_id[:8], ctx.message.text
-            )
-            self._sink.command(
-                pubkey_prefix=ctx.pubkey_prefix,
-                command=command,
-                transport="dm" if ctx.is_dm else "channel",
-                channel_idx=None if ctx.is_dm else ctx.message.channel_idx,
-                accepted=False,
-                reject_reason="queue_full",
-            )
-            await reply(BUSY_REPLY)
+            # An interrupt is already waiting behind the in-flight response.
+            self._drop(ctx, command, "queue_full")
             return
 
         if player_id not in self._workers or self._workers[player_id].done():

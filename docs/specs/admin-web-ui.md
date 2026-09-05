@@ -224,7 +224,7 @@ CREATE TABLE commands (
   transport     TEXT    NOT NULL,                 -- dm | channel | bots_channel
   channel_idx   INTEGER,
   accepted      INTEGER NOT NULL,                 -- 0 = rejected before handling
-  reject_reason TEXT                              -- rate_limited | queue_full | not_in_lobby | unknown
+  reject_reason TEXT                              -- response_pending | queue_full | not_in_lobby | bots_cooldown | unknown
 );
 CREATE INDEX idx_commands_at     ON commands(at);
 CREATE INDEX idx_commands_player ON commands(pubkey_prefix, at);
@@ -301,9 +301,10 @@ in-memory `SessionBus` only — it is never written to SQLite in this phase.
 | `runner.py` `_on_channel_msg` / `_on_bots_channel_msg` | `message_rx(transport="channel", ...)`, `player_seen` |
 | `runner.py` `_on_dm_msg` | `message_rx(transport="dm", ...)`, `player_seen` |
 | `runner.py` `_send_with_spacing` | `message_tx(...)`, including `dropped=1` on the overflow path |
-| `bot.py` `_rate_check` (deny) | `command(accepted=0, reject_reason="rate_limited")` |
+| `bot.py` `_enqueue` (response still pending) | `command(accepted=0, reject_reason="response_pending")` |
 | `bot.py` `dispatch_channel` (non-lobby) | `command(accepted=0, reject_reason="not_in_lobby")` |
 | `bot.py` `_enqueue` (`QueueFull`) | `command(accepted=0, reject_reason="queue_full")` |
+| `bot.py` `dispatch_bots_channel` (cooldown) | `command(accepted=0, reject_reason="bots_cooldown")` |
 | `bot.py` `_handle` (entry) | `command(accepted=1, ...)` |
 | `session_state.py` `add_session` / `remove_session` | `session_started` / `session_ended` |
 | `session_state.py` `add_watcher` / `remove_watcher` | `watchers_changed` |
