@@ -338,17 +338,32 @@ so and is no longer tracked as watching. Nothing is sent to the player beyond th
 
 ### Environment (`.env`)
 
-| Variable | Purpose |
-| -------- | ------- |
-| `MESHCORE_DEVICE` | Host serial device path (default `/dev/meshcore`) |
-| `MESHCORE_CONTAINER_DEVICE` | Device path inside the container |
-| `MESHCORE_GROUP_GID` | Host `dialout` group GID (default `20`) |
-| `ZORKBOT_CONFIG` | Path to bot TOML (default `./zorkbot/zorkbot.toml`) |
-| `MAX_ACTIVE_SESSIONS` | Override max concurrent sessions (default `8`) |
-| `SESSION_IDLE_START_SECONDS` | Override idle-start timeout (default `300`) |
-| `SESSION_INACTIVITY_SECONDS` | Override inactivity timeout (default `1800`) |
-| `ADMIN_UI_ENABLED` | Enable the [admin web UI](#admin-web-ui) (default `false`) |
-| `ADMIN_UI_PORT` | Host port to publish it on (default `8081`) |
+All are optional; the defaults below apply when a variable is unset. Copy
+[`.env.example`](.env.example) to `.env` to get the full annotated list.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `MESHCORE_DEVICE` | `/dev/meshcore` | Host serial device path |
+| `MESHCORE_CONTAINER_DEVICE` | `/dev/meshcore` | Device path inside the container |
+| `MESHCORE_GROUP_GID` | `20` | Host `dialout` group GID |
+| `ZORKBOT_CONFIG` | `./zorkbot/zorkbot.toml` | Path to bot TOML |
+| `GAME_URL` | `http://game:8080` | Where the bot reaches the game API. The default is correct under Compose (`game` is the service name); override it only for a local non-Docker run |
+| `MAX_ACTIVE_SESSIONS` | `8` | Max concurrent sessions |
+| `SESSION_IDLE_START_SECONDS` | `300` | Idle-start timeout |
+| `SESSION_INACTIVITY_SECONDS` | `1800` | Inactivity timeout |
+| `ADMIN_UI_ENABLED` | `false` | Enable the [admin web UI](#admin-web-ui) |
+| `ADMIN_UI_BIND` | `0.0.0.0` | Admin UI listen address inside the container |
+| `ADMIN_UI_PORT` | `8081` | Admin UI port, applied to both sides of the published mapping |
+| `ADMIN_UI_DB` | `/data/admin.db` | Admin event SQLite file (must stay under the mounted `/data`) |
+
+`GAME_URL` and the four `ADMIN_UI_*` variables override the matching keys in
+`zorkbot/zorkbot.toml`. Leaving one unset lets the TOML value apply.
+
+The game service also reads `SAVE_DIR`, `LISTEN_ADDR`, `ENCRUSTED_PATH` and
+`GAME_FILE`, but Compose does not forward them and their defaults are tied to the
+image's volume mounts, published port and healthcheck. Setting them in `.env` has
+no effect; changing them means editing `docker-compose.yml` and the `game`
+Dockerfile together.
 
 ### Bot config (`zorkbot/zorkbot.toml`)
 
@@ -425,9 +440,19 @@ bind = "0.0.0.0"     # or "127.0.0.1" to restrict to the host only
 port = 8081
 ```
 
-or set `ADMIN_UI_ENABLED=true` in `.env` / the environment. Then publish the port in
-`docker-compose.yml` (already wired to `${ADMIN_UI_PORT:-8081}`) and browse to
-`http://<pi-address>:8081`.
+or — **the preferred route under Docker** — set `ADMIN_UI_ENABLED=true` in `.env`.
+The port is already published in `docker-compose.yml`, so this is the only step;
+browse to `http://<pi-address>:8081`.
+
+Environment variables take precedence over the TOML: if `ADMIN_UI_ENABLED` is set
+to anything non-empty it wins, including `false`. Under Compose the container
+always receives the `ADMIN_UI_*` variables, so keep them **unset** (not set to an
+empty-looking value) whenever you want the `[admin_ui]` TOML section to apply.
+
+To move the UI off port 8081, set `ADMIN_UI_PORT` in `.env` rather than
+`[admin_ui].port` in the TOML — `ADMIN_UI_PORT` drives both the host and the
+container side of the mapping, whereas the TOML key changes only the container
+side and would leave the published port pointing at nothing.
 
 **First login:** username `admin`, password `zorkbot-admin!`. The UI forces a password change on
 first login and will not let you do anything else until you set one (12+ characters). Change it

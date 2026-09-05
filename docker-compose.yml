@@ -38,10 +38,17 @@ services:
       - ${ZORKBOT_CONFIG:-./zorkbot/zorkbot.toml}:/app/zorkbot.toml:ro
       - ./data/admin:/data
     ports:
-      - "${ADMIN_UI_PORT:-8081}:8081"
+      - "${ADMIN_UI_PORT:-8081}:${ADMIN_UI_PORT:-8081}"
     environment:
-      GAME_URL: http://game:8080
-      ADMIN_UI_ENABLED: ${ADMIN_UI_ENABLED:-false}
+      GAME_URL: ${GAME_URL:-http://game:8080}
+      # These must default to EMPTY, not to a literal value. config.py treats any
+      # non-empty string as an override, so a default of "false" here would clobber
+      # [admin_ui] in zorkbot.toml and make that section impossible to use. Empty
+      # means "unset", and the TOML value wins.
+      ADMIN_UI_ENABLED: ${ADMIN_UI_ENABLED:-}
+      ADMIN_UI_BIND: ${ADMIN_UI_BIND:-}
+      ADMIN_UI_PORT: ${ADMIN_UI_PORT:-}
+      ADMIN_UI_DB: ${ADMIN_UI_DB:-}
     command:
       - --serial
       - ${MESHCORE_CONTAINER_DEVICE:-/dev/meshcore}
