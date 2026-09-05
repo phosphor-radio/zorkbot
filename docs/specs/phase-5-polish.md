@@ -1,7 +1,19 @@
 # Phase 5 — Polish
 
-**Status:** Implemented  
+**Status:** Partly superseded — see note below  
 **Planning reference:** `docs/planning/initial-plan.md` (Phase 5)
+
+> **Superseded 2026-09-05.** The command queue and per-sender rate limiting
+> described below are no longer part of the implementation. A player's commands
+> are now dropped, in silence, while their previous response is still
+> transmitting — gating on that state rather than on elapsed time, so a player
+> who waits for their reply is never turned away. `command_queue_size` and
+> `rate_limit_seconds` are gone, along with `command_queue.py`, `rate_limit.py`,
+> and both the queue-full and rate-limit replies. `!bots` is now gated by
+> `bots_cooldown_seconds` instead. See "Throttling" in `README.md`.
+>
+> `announce_on_start` and the Docker log rotation below are unaffected. The rest
+> of this document is kept as the record of what Phase 5 delivered.
 
 ## Scope
 
