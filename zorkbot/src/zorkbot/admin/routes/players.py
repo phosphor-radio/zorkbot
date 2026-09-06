@@ -22,6 +22,13 @@ SELECT
   p.banned_at,
   (SELECT COUNT(*) FROM messages WHERE direction = 'rx' AND pubkey_prefix = p.pubkey_prefix) AS messages_received_from,
   (SELECT COUNT(*) FROM messages WHERE direction = 'tx' AND pubkey_prefix = p.pubkey_prefix) AS messages_sent_to,
+  -- acked = 1/0, never NOT acked: NULL means delivery was not measured for
+  -- that packet (watcher fan-out, or a send that predates ACK support), which
+  -- is not the same as having failed.
+  (SELECT COUNT(*) FROM messages
+     WHERE direction = 'tx' AND acked = 1 AND pubkey_prefix = p.pubkey_prefix) AS dms_delivered,
+  (SELECT COUNT(*) FROM messages
+     WHERE direction = 'tx' AND acked = 0 AND pubkey_prefix = p.pubkey_prefix) AS dms_undelivered,
   (SELECT COUNT(*) FROM sessions WHERE pubkey_prefix = p.pubkey_prefix) AS sessions_started,
   (SELECT COALESCE(SUM(COALESCE(ended_at, strftime('%s','now')) - started_at), 0)
      FROM sessions WHERE pubkey_prefix = p.pubkey_prefix) AS total_play_seconds
@@ -37,6 +44,8 @@ def _row_to_dict(row) -> dict:
         "last_active_at": row["last_seen_at"],
         "messages_received_from": row["messages_received_from"],
         "messages_sent_to": row["messages_sent_to"],
+        "dms_delivered": row["dms_delivered"],
+        "dms_undelivered": row["dms_undelivered"],
         "sessions_started": row["sessions_started"],
         "total_play_seconds": row["total_play_seconds"],
         "banned": row["banned_at"] is not None,

@@ -448,6 +448,16 @@ async function loadHistory(reset) {
 // charting library, so the admin UI stays fully offline-capable).
 // ---------------------------------------------------------------------
 
+// Only player DMs are ACK-waited, so an empty denominator is the normal
+// state of a bot that has sent nothing but watcher fan-out and channel
+// traffic — it is "nothing measured", never 0%.
+function deliveryRate(delivered, failed, suffix) {
+  const measured = delivered + failed;
+  if (measured === 0) return "\u2014";
+  const pct = ((delivered / measured) * 100).toFixed(1);
+  return suffix ? `${pct}% (${suffix})` : `${pct}%`;
+}
+
 function currentRangeSeconds() {
   return parseInt(document.getElementById("chart-range-select").value, 10);
 }
@@ -519,6 +529,17 @@ async function loadCharts() {
     renderLineChart(document.getElementById("chart-tx"), [
       { name: "Messages sent", points: txData.map((d) => ({ t: d.t, v: d.count })) },
     ]);
+
+    const delResp = await api(`/stats/delivery?${qs}`);
+    const delData = await delResp.json();
+    renderLineChart(document.getElementById("chart-delivery"), [
+      { name: "Delivered", points: delData.map((d) => ({ t: d.t, v: d.delivered })) },
+      { name: "Not acknowledged", points: delData.map((d) => ({ t: d.t, v: d.failed })) },
+    ]);
+    const delivered = delData.reduce((n, d) => n + d.delivered, 0);
+    const failed = delData.reduce((n, d) => n + d.failed, 0);
+    document.getElementById("delivery-rate").textContent =
+      deliveryRate(delivered, failed, `${delivered + failed} measured`);
   } catch (e) {
     /* view not active or transient error */
   }
@@ -564,6 +585,7 @@ async function loadPlayers() {
       <td>${p.sessions_started}</td>
       <td>${p.messages_received_from}</td>
       <td>${p.messages_sent_to}</td>
+      <td class="mono">${deliveryRate(p.dms_delivered, p.dms_undelivered)}</td>
       <td class="mono">${escapeHtml(p.pubkey_prefix)}</td>
     `;
     tbody.appendChild(tr);

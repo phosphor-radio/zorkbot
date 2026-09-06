@@ -199,3 +199,73 @@ async def test_status_reports_startup_flush_count(client) -> None:
 
     assert r.status_code == 200
     assert r.json()["startup_flushed_messages"] == 7
+
+
+@pytest.mark.asyncio
+async def test_stats_delivery_counts_only_measured_sends(client) -> None:
+    """Watcher fan-out, channel traffic and overflow drops have no delivery
+    measurement, so they must not appear in the ratio at all."""
+    token = await _admin_token(client)
+    store = client.bot.event_sink._store
+
+    rows = [
+        # measured player DMs: two delivered, one not
+        ("tx", "dm", 1),
+        ("tx", "dm", 1),
+        ("tx", "dm", 0),
+        # unmeasured: watcher fan-out, a channel packet, an overflow drop
+        ("tx", "dm", None),
+        ("tx", "channel", None),
+    ]
+    for direction, transport, acked in rows:
+        await store.run(
+            "INSERT INTO messages(at, direction, transport, chars, acked) "
+            "VALUES (100, ?, ?, 10, ?)",
+            (direction, transport, acked),
+        )
+
+    r = await client.get(
+        "/api/stats/delivery?from=0&to=3600&bucket=hour",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert sum(point["delivered"] for point in body) == 2
+    assert sum(point["failed"] for point in body) == 1
+
+
+@pytest.mark.asyncio
+async def test_stats_delivery_zero_fills_empty_range(client) -> None:
+    token = await _admin_token(client)
+    r = await client.get(
+        "/api/stats/delivery?from=0&to=3600&bucket=hour",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) >= 1
+    assert all(point["delivered"] == 0 and point["failed"] == 0 for point in body)
+
+
+@pytest.mark.asyncio
+async def test_players_report_delivery_counts(client) -> None:
+    token = await _admin_token(client)
+    store = client.bot.event_sink._store
+    await store.run(
+        "INSERT INTO players(pubkey_prefix, name, first_seen_at, last_seen_at) "
+        "VALUES ('aabbccddeeff', 'Alice', 1, 1)",
+    )
+    for acked in (1, 1, 0, None):
+        await store.run(
+            "INSERT INTO messages(at, direction, transport, pubkey_prefix, chars, acked) "
+            "VALUES (100, 'tx', 'dm', 'aabbccddeeff', 10, ?)",
+            (acked,),
+        )
+
+    r = await client.get("/api/players", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    player = r.json()["players"][0]
+    assert player["dms_delivered"] == 2
+    assert player["dms_undelivered"] == 1
+    # The unmeasured send still counts as sent, just not as measured.
+    assert player["messages_sent_to"] == 4
