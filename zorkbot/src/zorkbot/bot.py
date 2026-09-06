@@ -390,7 +390,7 @@ class ZorkBot:
             return
 
         if command == "end":
-            await handle_end(ctx, self.game, self._state, rest_args, send_dm)
+            await handle_end(ctx, self.game, self._state, rest_args, send_dm, self._spawn)
             return
 
         if command == "list":
@@ -411,7 +411,7 @@ class ZorkBot:
 
         if command == "_game":
             await handle_game_command(
-                ctx, self.game, self._state, rest_args, send_dm
+                ctx, self.game, self._state, rest_args, send_dm, self._spawn
             )
             return
 

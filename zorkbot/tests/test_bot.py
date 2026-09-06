@@ -211,7 +211,7 @@ def test_dm_help_packets_point_back_to_the_configured_channel() -> None:
 
     for in_session in (False, True):
         text = "\n".join(dm_help_packets("#some-other-channel", in_session=in_session))
-        assert "Join #some-other-channel and send !help for more info." in text
+        assert "Join #some-other-channel and send !help for more info" in text
         assert "#zork" not in text
 
 
@@ -376,7 +376,7 @@ async def test_help_via_dm_mentions_the_game_channel() -> None:
         await bot.drain()
 
     assert any(
-        "Join #some-other-channel and send !help for more info." in r for r in replies
+        "Join #some-other-channel and send !help for more info" in r for r in replies
     ), f"Got: {replies}"
 
 
@@ -592,6 +592,76 @@ async def test_game_command_in_dm() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_player_not_blocked_by_watcher_delivery() -> None:
+    """A player's next command must not wait on watcher fan-out.
+
+    The pending-command gate exists to stop a flood, not to make watchers a
+    tax on the player who is being watched: their own reply is the signal
+    that they are free to act again, whether or not anyone is observing.
+    """
+    watcher_id = "112233445566"
+    config = BotConfig()
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    import json as _json
+
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        side_effect=lambda request: httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "output": f"Reply to: {_json.loads(request.content)['text']}",
+            },
+        )
+    )
+
+    player_replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        player_replies.append(text)
+
+    watcher_send_started = asyncio.Event()
+    release_watcher_send = asyncio.Event()
+
+    async def send_dm(pubkey_prefix: str, text: str) -> None:
+        if pubkey_prefix == watcher_id:
+            watcher_send_started.set()
+            await release_watcher_send.wait()
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        bot.set_send_dm(send_dm)
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        player_replies.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await watcher_send_started.wait()  # fan-out to the watcher is now stuck
+
+        # The player already has their own reply — fan-out is a side effect
+        # for a third party, not part of what "north" owes the player.
+        assert player_replies == ["Reply to: north"]
+
+        # A second command sent now must be accepted, not dropped.
+        await bot.dispatch_dm(_dm_message("south"), reply)
+
+        release_watcher_send.set()
+        await bot.drain()
+        if bot._background_tasks:
+            await asyncio.gather(*bot._background_tasks)
+
+    assert player_replies == ["Reply to: north", "Reply to: south"], (
+        "the player's second command was dropped while watcher fan-out for "
+        "the first was still in flight"
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_watcher_sees_echo_title_and_description_as_separate_lines() -> None:
     """A watcher's relay includes a "[Name] > command" echo line ahead of
     the game's own output — this must not defeat title/line-break detection
@@ -624,6 +694,10 @@ async def test_watcher_sees_echo_title_and_description_as_separate_lines() -> No
 
         await bot.dispatch_dm(_dm_message("north"), reply)
         await bot.drain()
+        # Watcher fan-out runs in the background now — wait for it explicitly
+        # rather than relying on drain() to have scheduled it by coincidence.
+        if bot._background_tasks:
+            await asyncio.gather(*bot._background_tasks)
 
     dm_texts = [call.args[1] for call in bot._send_dm.await_args_list]
     assert dm_texts == [
@@ -658,6 +732,9 @@ async def test_end_notifies_watchers_but_not_player_or_channel() -> None:
 
         await bot.dispatch_dm(_dm_message("!end"), reply)
         await bot.drain()
+        # Watcher notification is backgrounded now — wait for it explicitly.
+        if bot._background_tasks:
+            await asyncio.gather(*bot._background_tasks)
 
     # Player still gets their own end confirmation.
     assert replies == ["Zork I Session #1 saved and ended."]
@@ -726,6 +803,9 @@ async def test_admin_end_notifies_watchers() -> None:
 
         await bot.dispatch_dm(_dm_message("!end 1", pubkey_prefix=admin_id), reply)
         await bot.drain()
+        # Watcher notification is backgrounded now — wait for it explicitly.
+        if bot._background_tasks:
+            await asyncio.gather(*bot._background_tasks)
 
     watcher_calls = bot._send_dm.await_args_list
     assert len(watcher_calls) == 1
