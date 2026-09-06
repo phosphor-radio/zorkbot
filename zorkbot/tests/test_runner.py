@@ -726,3 +726,54 @@ async def test_channel_reply_closure_never_reports_failure() -> None:
 
     reply = runner.bot.dispatch_channel.await_args.args[1]
     assert await reply("a packet") is True
+
+
+@pytest.mark.asyncio
+async def test_transmissions_are_logged_at_debug(caplog) -> None:
+    """The only per-packet record of an outgoing message in the log."""
+    runner, _ = _make_gate_runner()
+
+    with caplog.at_level("DEBUG", logger="zorkbot.runner"):
+        await runner._send_dm(PUBKEY_PREFIX, "hello")
+        await runner._send_watcher_dm(PUBKEY_PREFIX, "[Alice] > north")
+        await runner._send_chan_msg(1, "hello channel")
+
+    lines = [r.message for r in caplog.records if r.message.startswith("tx ")]
+    assert len(lines) == 3, lines
+    assert "player=aabbccdd" in lines[0] and "acked=True" in lines[0]
+    # Watcher fan-out and channel traffic are transmitted but not measured.
+    assert "acked=None" in lines[1]
+    assert "channel=1" in lines[2] and "acked=None" in lines[2]
+
+
+@pytest.mark.asyncio
+async def test_transmissions_are_not_logged_at_info(caplog) -> None:
+    """A line per packet per recipient is not what an INFO log is for."""
+    runner, _ = _make_gate_runner()
+
+    with caplog.at_level("INFO", logger="zorkbot.runner"):
+        await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    assert not [r for r in caplog.records if r.message.startswith("tx ")]
+
+
+@pytest.mark.asyncio
+async def test_adverts_are_not_double_logged(caplog) -> None:
+    """The advertiser logs those itself, at INFO."""
+    runner, _ = _make_gate_runner()
+
+    with caplog.at_level("DEBUG", logger="zorkbot.runner"):
+        await runner.send_advert(flood=True)
+
+    assert not [r for r in caplog.records if r.message.startswith("tx ")]
+
+
+@pytest.mark.asyncio
+async def test_dropped_packet_is_not_logged_as_transmitted(caplog) -> None:
+    runner, _ = _make_gate_runner(max_depth=0)
+
+    with caplog.at_level("DEBUG", logger="zorkbot.runner"):
+        await runner._send_dm(PUBKEY_PREFIX, "dropped")
+
+    assert not [r for r in caplog.records if r.message.startswith("tx ")]
+    assert "send queue overflow" in caplog.text
