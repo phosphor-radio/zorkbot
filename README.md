@@ -26,6 +26,12 @@ The parser understands many synonyms. If stuck, `look` is always safe.
 
 **Room descriptions:** Zork prints the **full** description of a location only the **first** time you enter it. On return you get a one-line summary. Use `look` to see the full description again.
 
+### Resources
+
+- Maps of Zork I, II, and III - https://archive.org/details/zork-i-ii-iii-maps/
+- Original Zork I manual - https://infodoc.plover.net/manuals/zork1.pdf
+- Zork Fandom command list - https://zork.fandom.com/wiki/Command_List 
+
 ### Brief history
 
 Zork began at MIT in the late 1970s as *Dungeon*, inspired by early cave-exploration games. Infocom published **Zork I** in 1980. This project runs the original story file (`zork1.z3`) through [encrusted](https://github.com/DeMille/encrusted), a modern Z-machine interpreter.
