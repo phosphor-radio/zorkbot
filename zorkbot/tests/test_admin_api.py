@@ -14,6 +14,7 @@ from zorkbot.admin.auth import DEFAULT_PASSWORD, AuthService
 from zorkbot.admin.bus import SessionBus
 from zorkbot.admin.context import AdminContext
 from zorkbot.admin.events import SqliteEventSink
+from zorkbot.admin.logbus import LogBus
 from zorkbot.admin.store import Store
 from zorkbot.advertiser import Advertiser
 from zorkbot.bot import ZorkBot
@@ -29,6 +30,7 @@ async def client():
         auth = AuthService(store)
         await auth.ensure_admin_user()
         bus = SessionBus(max_streams=2)
+        logbus = LogBus(buffer_size=50, max_streams=2)
         sink = SqliteEventSink(store, bus, bot_run_id="testrun")
         sink.start()
 
@@ -39,13 +41,14 @@ async def client():
         bot = ZorkBot(config, game, Advertiser(), meshcore, event_sink=sink)
 
         ctx = AdminContext(
-            store=store, bus=bus, auth=auth, sink=sink, bot=bot,
+            store=store, bus=bus, logbus=logbus, auth=auth, sink=sink, bot=bot,
             config=config.admin_ui, process_started_at=0.0,
         )
         app = create_app(ctx)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             c.bot = bot  # type: ignore[attr-defined]
+            c.logbus = logbus  # type: ignore[attr-defined]
             yield c
 
         await sink.stop()
@@ -269,3 +272,29 @@ async def test_players_report_delivery_counts(client) -> None:
     assert player["dms_undelivered"] == 1
     # The unmeasured send still counts as sent, just not as measured.
     assert player["messages_sent_to"] == 4
+
+
+# ---------------------------------------------------------------------
+# Log tail stream
+#
+# Only the request-validation half is testable here: httpx's ASGITransport
+# buffers the whole response body before returning, so it can never read an
+# open text/event-stream. The stream body itself is driven directly in
+# test_admin_logbus.py.
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_logs_stream_requires_auth(client) -> None:
+    r = await client.get("/api/logs/stream")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logs_stream_rejects_an_unknown_level(client) -> None:
+    token = await _admin_token(client)
+    r = await client.get(
+        "/api/logs/stream?level=TRACE", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "invalid_request"

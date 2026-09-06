@@ -8,6 +8,7 @@
   --accent: #5fb3ff;
   --danger: #ff6b6b;
   --success: #58d68d;
+  --warning: #f2c14e;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -150,10 +151,24 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; color: var(--text-di
 .chart { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 .chart svg { display: block; width: 100%; height: 160px; }
 .chart .axis-label { fill: var(--text-dim); font-size: 10px; font-family: var(--mono); }
-.chart .series-a { stroke: var(--accent); fill: none; stroke-width: 1.5; }
-.chart .series-b { stroke: var(--danger); fill: none; stroke-width: 1.5; }
+/* One colour per series, declared once and read by both the SVG stroke and the
+   legend swatch. The swatch cannot carry a style="" attribute: the admin CSP
+   is style-src 'self', which blocks inline styles, so a hardcoded colour there
+   is silently dropped and the dot renders invisible. */
+.chart .series-a { --series-color: var(--accent); }
+.chart .series-b { --series-color: var(--danger); }
+.chart .series-c { --series-color: var(--success); }
+.chart .series-d { --series-color: var(--warning); }
+.chart svg path { stroke: var(--series-color); fill: none; stroke-width: 1.5; }
 .chart .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-dim); padding: 0 4px 4px; }
-.chart .legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.chart .legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  background: var(--series-color);
+}
 
 .watcher-chip {
   display: inline-block;
@@ -191,6 +206,48 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; color: var(--text-di
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+#log-stream {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+#log-lines {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.log-line {
+  display: flex;
+  gap: 10px;
+  padding: 1px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log-line:hover { background: var(--bg-elevated); }
+.log-line .log-at { color: var(--text-dim); flex: none; }
+.log-line .log-level { flex: none; width: 62px; font-weight: 600; }
+.log-line .log-logger { color: var(--text-dim); flex: none; }
+.log-line .log-message { flex: 1; min-width: 0; }
+/* Level colours, keyed off the record's own level so a scrolling wall of INFO
+   still makes a WARNING or ERROR findable at a glance. */
+.log-line.level-debug .log-level { color: var(--text-dim); }
+.log-line.level-info .log-level { color: var(--accent); }
+.log-line.level-warning .log-level { color: var(--warning); }
+.log-line.level-error .log-level,
+.log-line.level-critical .log-level { color: var(--danger); }
+.log-line.level-error, .log-line.level-critical { background: rgba(255, 107, 107, 0.06); }
+.log-gap {
+  padding: 2px 12px;
+  color: var(--warning);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.log-empty { padding: 8px 12px; color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+#log-status { margin-left: auto; }
 
 button.link {
   background: none;

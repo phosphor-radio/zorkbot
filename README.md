@@ -573,9 +573,9 @@ Admin commands:
 
 An optional, LAN-accessible web console runs embedded inside the `zorkbot` process — live
 sessions and watchers, live session watch, session start/end history, session/message/command
-charts, and per-player stats. It talks to a small OAuth2-shaped API backed by its own SQLite
-database (`/data/admin.db` in the container), separate from the game's save data. Full design in
-[`docs/specs/admin-web-ui.md`](docs/specs/admin-web-ui.md).
+charts, per-player stats, and a live tail of the bot's own log. It talks to a small OAuth2-shaped
+API backed by its own SQLite database (`/data/admin.db` in the container), separate from the game's
+save data. Full design in [`docs/specs/admin-web-ui.md`](docs/specs/admin-web-ui.md).
 
 It is **off by default**. To enable it, set in `zorkbot/zorkbot.toml`:
 
@@ -599,6 +599,13 @@ To move the UI off port 8081, set `ADMIN_UI_PORT` in `.env` rather than
 `[admin_ui].port` in the TOML — `ADMIN_UI_PORT` drives both the host and the
 container side of the mapping, whereas the TOML key changes only the container
 side and would leave the published port pointing at nothing.
+
+**Logs tab:** a live tail of the running process, the same lines
+`docker compose logs zorkbot` would show, without needing shell access to the Pi. The level
+dropdown filters server-side, so it can only narrow what the process already logs — the header
+reports the process's own level, and you raise it with `log_level` in `zorkbot.toml` if you want
+DEBUG in the view. The tail is memory-only and bounded (`log_buffer_lines`, default 500): it is a
+window on what is happening now, not a log archive.
 
 **First login:** username `admin`, password `zorkbot-admin!`. The UI forces a password change on
 first login and will not let you do anything else until you set one (12+ characters). Change it

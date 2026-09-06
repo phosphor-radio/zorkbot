@@ -81,3 +81,5 @@ pubkeys = ["your-pubkey-prefix"]
 # event_queue_size = 1024
 # live_buffer_events = 50
 # max_live_streams = 4
+# log_buffer_lines = 500            # process log records kept for the Logs view
+# max_log_streams = 2

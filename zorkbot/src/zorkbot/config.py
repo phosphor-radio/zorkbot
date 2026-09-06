@@ -18,6 +18,7 @@ _ADMIN_UI_KEYS = frozenset({
     "access_token_ttl_seconds", "refresh_token_ttl_seconds",
     "event_retention_days", "event_queue_size",
     "live_buffer_events", "max_live_streams",
+    "log_buffer_lines", "max_log_streams",
 })
 _CHANNEL_KEYS = frozenset({"index", "name", "secret"})
 _ROOT_OPTIONAL_KEYS = frozenset({
@@ -63,6 +64,11 @@ class AdminUIConfig:
     event_queue_size: int = 1024
     live_buffer_events: int = 50
     max_live_streams: int = 4
+    # Process log records kept in memory for the Logs view to replay on
+    # connect. Bounded because it lives in RAM on a Pi Zero, and because the
+    # log tail is a live window, not a history — that is what SQLite is for.
+    log_buffer_lines: int = 500
+    max_log_streams: int = 2
 
 
 @dataclass
@@ -275,6 +281,10 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
             ui.live_buffer_events = int(admin_ui["live_buffer_events"])
         if "max_live_streams" in admin_ui:
             ui.max_live_streams = int(admin_ui["max_live_streams"])
+        if "log_buffer_lines" in admin_ui:
+            ui.log_buffer_lines = int(admin_ui["log_buffer_lines"])
+        if "max_log_streams" in admin_ui:
+            ui.max_log_streams = int(admin_ui["max_log_streams"])
 
 
 def _warn_misplaced_section_keys(section: str, values: dict, allowed: frozenset[str]) -> None:

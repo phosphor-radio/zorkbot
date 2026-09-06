@@ -1,7 +1,8 @@
 """Administrative web UI: embedded FastAPI app + lifecycle management.
 
 `AdminUIServer` owns the SQLite store, the OAuth2 auth service, the live
-SSE session bus, and the batched event sink, and runs uvicorn as an asyncio
+SSE session bus, the process log tail, and the batched event sink, and runs
+uvicorn as an asyncio
 task alongside `MeshCoreRunner` inside the same process — see
 docs/specs/admin-web-ui.md for why this isn't a separate service.
 """
@@ -23,7 +24,9 @@ from zorkbot.admin.auth import AuthService
 from zorkbot.admin.bus import SessionBus
 from zorkbot.admin.context import AdminContext
 from zorkbot.admin.events import SqliteEventSink
+from zorkbot.admin.logbus import LogBus
 from zorkbot.admin.routes import auth as auth_routes
+from zorkbot.admin.routes import logs as logs_routes
 from zorkbot.admin.routes import meta as meta_routes
 from zorkbot.admin.routes import players as players_routes
 from zorkbot.admin.routes import sessions as sessions_routes
@@ -65,6 +68,7 @@ def create_app(ctx: AdminContext) -> FastAPI:
     app.include_router(stats_routes.router, prefix="/api")
     app.include_router(players_routes.router, prefix="/api")
     app.include_router(meta_routes.router, prefix="/api")
+    app.include_router(logs_routes.router, prefix="/api")
 
     @app.get("/health")
     async def health() -> dict:
@@ -95,6 +99,14 @@ class AdminUIServer:
             buffer_size=config.live_buffer_events,
             max_streams=config.max_live_streams,
         )
+        self.logbus = LogBus(
+            buffer_size=config.log_buffer_lines,
+            max_streams=config.max_log_streams,
+        )
+        # Installed now rather than in `start()`: config load, radio connect
+        # and the rest of startup are exactly the records an operator opens
+        # the log view to read, and they happen before the server is up.
+        self.logbus.attach()
         self.auth = AuthService(
             self.store,
             access_token_ttl_seconds=config.access_token_ttl_seconds,
@@ -120,6 +132,7 @@ class AdminUIServer:
         ctx = AdminContext(
             store=self.store,
             bus=self.bus,
+            logbus=self.logbus,
             auth=self.auth,
             sink=self.sink,
             bot=bot,
@@ -154,6 +167,9 @@ class AdminUIServer:
                 logger.exception("admin-ui: retention prune failed")
 
     async def stop(self) -> None:
+        # Detach first: past this point the loop is winding down, and a record
+        # fanned out to a stream that no longer has a reader is pure noise.
+        self.logbus.detach()
         if self._retention_task is not None:
             self._retention_task.cancel()
         if self._server is not None:
