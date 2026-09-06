@@ -32,7 +32,7 @@ command and spend the airtime again.
 
 ## Goal
 
-1. Learn whether each DM was delivered, by waiting for its ACK.
+1. Learn whether each DM **to a player** was delivered, by waiting for its ACK.
 2. Retransmit an unacknowledged DM a bounded number of times, using the library's
    `send_msg_with_retry` rather than a hand-rolled loop.
 3. Keep `send_spacing_seconds` governing **every** transmission the bot makes, retransmissions
@@ -45,6 +45,8 @@ command and spend the airtime again.
   `send_chan_msg` waits for `OK` and there is nothing further to wait for. `_send_chan_msg` is
   unchanged.
 - **Adverts.** Same reason. `send_advert` keeps going through the gate untouched.
+- **Watcher fan-out.** Watcher DMs keep today's fire-and-forget `send_msg` path. See
+  [Watcher fan-out stays fire-and-forget](#2-watcher-fan-out-stays-fire-and-forget).
 - **Application-level replay.** No "resend the last response" command, no re-running a game
   command because its output did not land. Retry stays at the packet layer.
 - **Telling the player their packet was lost.** A DM saying "a packet did not reach you" is itself
@@ -55,14 +57,16 @@ command and spend the airtime again.
 
 ## Design
 
-### 1. ACK-aware DM send
+### 1. ACK-aware DM send (player traffic)
 
 `_send_dm` resolves the destination to a contact, calls `send_msg_with_retry` instead of
 `send_msg`, and reports whether the message was acknowledged:
 
 ```python
 async def _send_dm(self, pubkey_prefix: str, text: str) -> bool:
-    """Send one DM. Returns True if the recipient acknowledged it.
+    """Send one DM to a player and wait for its delivery ACK.
+
+    Returns True if the recipient acknowledged it.
 
     Returns False for both delivery failure and a local queue-overflow
     drop — from the caller's point of view the packet did not arrive
@@ -99,7 +103,65 @@ did (`meshcore/commands/messaging.py:174`),
 so `result is not None` is the delivery signal. It is also `None` on a queue-overflow drop, which
 is why the two are separated in the event sink rather than in the return value.
 
-### 2. Spacing still governs, including between retries
+### 2. Watcher fan-out stays fire-and-forget
+
+Watcher DMs are **not** ACK-waited and **not** retried. `_send_watcher_dm` is today's `_send_dm`,
+unchanged:
+
+```python
+async def _send_watcher_dm(self, pubkey_prefix: str, text: str) -> None:
+    """Send one watcher fan-out DM, fire and forget.
+
+    Deliberately not ACK-waited: see the spec. Watcher output is a courtesy
+    stream about someone else's game, and ACK-waiting it is the single
+    worst case for held-lock time (watchers x packets, each holding the
+    gate through its own ACK window) - a cost paid by the player being
+    watched, which is what decoupling the fan-out queue was meant to stop.
+    """
+    await self._send_with_spacing(
+        self.meshcore.commands.send_msg(pubkey_prefix, text),
+        transport="dm", pubkey_prefix=pubkey_prefix, chars=len(text),
+    )
+```
+
+Two reasons, and the second is the load-bearing one:
+
+- **A lost watcher packet costs a fragment of someone else's game.** A lost player packet costs
+  that player their turn. These are not the same packet and do not deserve the same airtime.
+- **Fan-out is where ACK-waiting hurts most.** A session with 2 watchers and a 3-packet response
+  fans out 6 DMs; ACK-waiting each one multiplies the worst-case held-lock time by six, and every
+  second of it is airtime unavailable to *every* player, charged for third-party traffic. That is
+  the same tax that `_fanout` ([bot.py:344](../../zorkbot/src/zorkbot/bot.py:344)) and the
+  decoupled fan-out queue (`261dfb7`) exist to keep off the player being watched. Adding an ACK
+  wait to fan-out would put a larger version of it straight back.
+
+**The split is clean at every call site.** Each `send_dm_func` parameter in the tree is already
+wholly player-facing or wholly watcher-facing — nothing has to branch on which kind of DM it is
+holding:
+
+| Call site | Traffic | Sender |
+|-----------|---------|--------|
+| [start.py:83](../../zorkbot/src/zorkbot/commands/start.py:83) (session intro) | player | ACK-aware |
+| [zork.py:101](../../zorkbot/src/zorkbot/commands/zork.py:101) (`send_initial_look`) | player | ACK-aware |
+| `Context.reply` / `reply_many` (all DM replies) | player | ACK-aware |
+| [zork.py:185](../../zorkbot/src/zorkbot/commands/zork.py:185) (`_notify_watchers`) | watcher | fire-and-forget |
+| [watcher_notify.py:25](../../zorkbot/src/zorkbot/watcher_notify.py:25) (session ended) | watcher | fire-and-forget |
+| [end.py:64](../../zorkbot/src/zorkbot/commands/end.py:64), [end.py:107](../../zorkbot/src/zorkbot/commands/end.py:107) | watcher | fire-and-forget |
+
+So the plumbing is a second injected function rather than a flag threaded through signatures:
+
+- `MeshCoreRunner.start()` calls `self.bot.set_send_watcher_dm(self._send_watcher_dm)` alongside
+  the existing `set_send_dm` ([runner.py:205](../../zorkbot/src/zorkbot/runner.py:205)).
+- `ZorkBot` grows `_send_watcher_dm` and a `send_watcher_dm` closure beside the `send_dm` one
+  ([bot.py:433](../../zorkbot/src/zorkbot/bot.py:433)), and passes it to `handle_end` and
+  `handle_game_command` where it passes `send_dm` today.
+- `_send_watcher_dm` **defaults to `_send_dm` when never injected**, so the CLI simulator
+  ([simulator.py:37](../../zorkbot/src/zorkbot/simulator.py:37)), which calls only `set_send_dm`
+  and has no radio, keeps working untouched.
+- The watcher-facing parameters in `end.py`, `handle_game_command` and `watcher_notify.py` are
+  renamed `send_watcher_dm_func` so the two cannot be crossed by accident later.
+
+### 3. Spacing still governs, including between retries
 
 Three separate mechanisms, and all three have to hold:
 
@@ -125,7 +187,7 @@ The third row is worth being explicit about: `_last_send_at` is stamped in the `
 the whole retry sequence returns**, so the next queued packet is spaced from the last
 retransmission rather than from the first attempt. That is conservative in the right direction.
 
-### 3. The send lock is held across the ACK wait — deliberately
+### 4. The send lock is held across the ACK wait — deliberately
 
 `send_msg_with_retry` is awaited as a single coroutine inside `async with self._send_lock`, so the
 lock stays held for the whole send/wait/retry sequence. This is a cost (head-of-line blocking for
@@ -148,12 +210,15 @@ of held lock for one undelivered packet — against ~4 s for the same packet tod
 nothing). The failure case is the slow one, which is the correct shape: a healthy link acks in well
 under the timeout and the sequence ends after one attempt, adding only the ACK round trip.
 
+That worst case is per *player* packet only. Watcher fan-out — the traffic that multiplies fastest
+with session count — never enters it, which is most of the reason it is excluded.
+
 Queue pressure follows from that: a slower drain means a deeper `max_send_queue_depth`. The
 per-player command gate (`5f18a0b`) already caps how much any one player can have in flight, so
 depth grows with concurrent players rather than per-player backlog, but the overflow threshold
 should be re-checked on a busy mesh after this lands.
 
-### 4. Destination resolution matters
+### 5. Destination resolution matters
 
 Passing the bare `pubkey_prefix` — a 12-hex-char, 6-byte prefix, which is what every DM event
 carries and what session state keys on — measurably weakens the retry:
@@ -201,19 +266,19 @@ path is re-learned. That is the correct trade when a direct path has genuinely b
 waste when the player has simply walked out of range for a minute — hence `dm_ack_flood_after`
 defaulting to 2 rather than 1, and a small `max_attempts`.
 
-### 5. What the bot does with the answer
+### 6. What the bot does with the answer
 
 Phase 1 keeps the reaction minimal and observational:
 
 - **Log it.** One `WARNING` per undelivered packet: player prefix, character count, attempts made.
   Nothing per attempt at INFO — a flapping link would drown the log.
 - **Record it.** `message_tx` gains `acked: bool | None`; `None` means "not measured" (channel
-  messages, `dm_ack_enabled = false`, and the overflow-drop path, which already records
-  `dropped=True`).
+  messages, watcher fan-out, `dm_ack_enabled = false`, and the overflow-drop path, which already
+  records `dropped=True`).
 - **Nothing else.** No apology DM, no session teardown, no requeue. The session stays live; the
   player's next command works normally if the link recovers.
 
-### 6. Abandoning the rest of a dead response (optional, Phase 3)
+### 7. Abandoning the rest of a dead response (optional, Phase 3)
 
 Once a packet has failed every attempt, spending the remaining packets of the same response on the
 same link is airtime spent on a link that just proved it is not carrying traffic — and with retries
@@ -223,16 +288,19 @@ This needs the delivery result to reach the reply loops, which today discard it:
 
 - `ReplyFunc` is `Callable[[str], Awaitable[None]]` ([context.py:15](../../zorkbot/src/zorkbot/context.py:15)) — becomes `Awaitable[bool]`.
 - `Context.reply_many` ([context.py:58](../../zorkbot/src/zorkbot/context.py:58)) stops on the first `False` and returns it.
-- The per-packet DM loops in [zork.py:101](../../zorkbot/src/zorkbot/commands/zork.py:101),
-  [zork.py:185](../../zorkbot/src/zorkbot/commands/zork.py:185),
-  [start.py:83](../../zorkbot/src/zorkbot/commands/start.py:83) and
-  [watcher_notify.py:25](../../zorkbot/src/zorkbot/watcher_notify.py:25) do the same.
+- The player-facing per-packet DM loops in
+  [zork.py:101](../../zorkbot/src/zorkbot/commands/zork.py:101) and
+  [start.py:83](../../zorkbot/src/zorkbot/commands/start.py:83) do the same. The watcher loops
+  ([zork.py:185](../../zorkbot/src/zorkbot/commands/zork.py:185),
+  [watcher_notify.py:25](../../zorkbot/src/zorkbot/watcher_notify.py:25)) are untouched — they have
+  no delivery result to act on, and abandoning a fan-out on a signal they never receive is not a
+  behaviour they can have.
 - The simulator's `_on_dm_send` ([simulator.py:37](../../zorkbot/src/zorkbot/simulator.py:37))
   returns `True` unconditionally; it has no radio and nothing to measure.
 
 Gated by `dm_ack_abandon_response` (default `true`), so the behaviour can be turned off without
 reverting the plumbing. Deliberately split out of Phase 1: it changes a signature threaded through
-five modules, and Phase 1 is worth having on its own.
+four modules, and Phase 1 is worth having on its own.
 
 ---
 
@@ -241,7 +309,7 @@ five modules, and Phase 1 is worth having on its own.
 New keys, all under the existing root table alongside `send_spacing_seconds`:
 
 ```toml
-# dm_ack_enabled = true             # wait for the delivery ACK on DMs
+# dm_ack_enabled = true             # wait for the delivery ACK on player DMs
 # dm_ack_max_attempts = 3           # total transmissions per packet, direct path
 # dm_ack_max_flood_attempts = 2     # cap when the contact is flood-routed
 # dm_ack_flood_after = 2            # reset path to flood after N direct failures
@@ -291,11 +359,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
 ```
 
-`acked` is nullable on purpose: rows written before this change, channel messages, adverts and
-overflow drops all mean "no delivery measurement", which is not the same as "not delivered". Every
-query must therefore read `acked = 0` for failures rather than `NOT acked`.
+`acked` is nullable on purpose: rows written before this change, channel messages, watcher fan-out,
+adverts and overflow drops all mean "no delivery measurement", which is not the same as "not
+delivered". Every query must therefore read `acked = 0` for failures rather than `NOT acked`.
 
-Surfaced as a DM delivery rate over the selected window:
+Surfaced as a delivery rate over the selected window. `acked IS NOT NULL` is what scopes it to
+player DMs — watcher fan-out is unmeasured and drops out of both the numerator and the denominator,
+so the figure reads as "how reliably players are being reached", not diluted by third-party
+traffic:
 
 ```sql
 SELECT SUM(acked = 1) AS delivered, SUM(acked = 0) AS failed
@@ -309,7 +380,9 @@ WHERE direction = 'tx' AND transport = 'dm' AND acked IS NOT NULL AND at >= ?
 
 | File | Change |
 |------|--------|
-| `zorkbot/src/zorkbot/runner.py` | `_dm_destination`; `_send_dm` uses `send_msg_with_retry` and returns `bool`; `_send_with_spacing` gains `ack_aware` and passes `acked` to `message_tx`; `_send_dm_packets` returns the result |
+| `zorkbot/src/zorkbot/runner.py` | `_dm_destination`; `_send_dm` uses `send_msg_with_retry` and returns `bool`; `_send_watcher_dm` keeps the old `send_msg` path; `start()` injects it via `set_send_watcher_dm`; `_send_with_spacing` gains `ack_aware` and passes `acked` to `message_tx` |
+| `zorkbot/src/zorkbot/bot.py` | `set_send_watcher_dm` + `_send_watcher_dm` (defaulting to `_send_dm`), a `send_watcher_dm` closure, passed to `handle_end` / `handle_game_command` and to `notify_watchers_session_ended` at [bot.py:161](../../zorkbot/src/zorkbot/bot.py:161) |
+| `zorkbot/src/zorkbot/commands/end.py`, `commands/zork.py`, `watcher_notify.py` | Watcher-facing `send_dm_func` parameters renamed `send_watcher_dm_func` — no behaviour change, just no longer crossable |
 | `zorkbot/src/zorkbot/config.py` | Five (six with Phase 3) new `BotConfig` fields + `_ROOT_OPTIONAL_KEYS` entries |
 | `zorkbot/src/zorkbot/admin/events.py` | `acked` on the `message_tx` protocol, `NullEventSink`, `SqliteEventSink` insert |
 | `zorkbot/src/zorkbot/admin/store.py` | `_SCHEMA_VERSION = 2`, `messages.acked` column, `_migrate()` |
@@ -317,7 +390,8 @@ WHERE direction = 'tx' AND transport = 'dm' AND acked IS NOT NULL AND at >= ?
 | `README.md` | Config table (~L391) and the RF serialization section (~L423-472) |
 | `docs/specs/dm-sessions.md` | RF Send Serialization section: sends are now ACK-aware |
 | `zorkbot/tests/test_runner.py` | `_make_gate_runner` must stub `send_msg_with_retry`; existing gate tests assert on `send_msg` |
-| Phase 3 | `context.py`, `bot.py`, `commands/zork.py`, `commands/start.py`, `watcher_notify.py`, `simulator.py` |
+| `zorkbot/tests/test_bot.py` | Fan-out tests that assert on the injected send func |
+| Phase 3 | `context.py`, `bot.py`, `commands/zork.py`, `commands/start.py`, `simulator.py` |
 
 ---
 
@@ -337,19 +411,30 @@ Unit (`test_runner.py`, extending the existing `_make_gate_runner` harness):
 6. Queue overflow still records `dropped=True` with `acked=None`, and still closes the coroutine.
 7. `dm_ack_enabled = false` restores exactly today's `send_msg` path.
 8. Channel sends and adverts are untouched — no `acked` recorded.
+9. `_send_watcher_dm` calls `send_msg`, never `send_msg_with_retry`, with `dm_ack_enabled` on —
+   and still goes through the gate, so watcher packets remain spaced.
+10. A bot with no `set_send_watcher_dm` injected (the simulator's shape) falls back to `_send_dm`
+    rather than failing.
+
+Bot (`test_bot.py`):
+
+11. Watcher fan-out and the end-of-session notice go through the watcher sender; the player's own
+    reply, the `!start` intro and the initial `look` go through the ACK-aware one.
 
 Store (`test_admin_store.py`):
 
-9. Opening a v1 DB adds `messages.acked` and bumps `schema_meta`; opening it twice is a no-op.
-10. `acked` round-trips as `NULL` / `0` / `1`.
+12. Opening a v1 DB adds `messages.acked` and bumps `schema_meta`; opening it twice is a no-op.
+13. `acked` round-trips as `NULL` / `0` / `1`.
 
 On hardware, with `dm_ack_max_attempts = 1` first:
 
-11. A player in range: DMs log as acknowledged, delivery rate ~100%, and reply latency grows by no
+14. A player in range: DMs log as acknowledged, delivery rate ~100%, and reply latency grows by no
     more than one ACK round trip.
-12. A player walking out of range mid-session: failures logged, `acked=0` recorded, the session
+15. A player walking out of range mid-session: failures logged, `acked=0` recorded, the session
     stays alive, and the bot recovers without a restart when they return.
-13. With retries enabled, watch that the send queue does not sit near `max_send_queue_depth` on a
+16. A session with 2 watchers: fan-out latency is unchanged from today, and the watched player's
+    reply cadence does not degrade as watchers are added.
+17. With retries enabled, watch that the send queue does not sit near `max_send_queue_depth` on a
     busy channel.
 
 ---
@@ -369,16 +454,20 @@ On hardware, with `dm_ack_max_attempts = 1` first:
   argument for a small `max_attempts`.
 - **Per-packet, not per-response.** Each packet is acknowledged independently. Without Phase 3, a
   response whose packet 2 fails still transmits packet 3.
-- **Watcher fan-out inherits the cost.** Each watcher's copy is its own ACK-waited send, so a
-  session with 2 watchers triples the worst-case blocking. `max_watchers_per_session` (default 2)
-  is the existing bound.
+- **Watcher delivery stays unknown.** By design, but it does mean a watcher can silently stop
+  receiving a session — the same failure mode players have today — and neither they nor the bot
+  will know. `!watch` is best-effort, and re-issuing it costs one packet. If this turns out to
+  matter, the cheap fix is ACK-waiting only the end-of-session notice (one packet per watcher, not
+  per response), not the output stream.
 - **`suggested_timeout` is trusted.** The firmware's estimate drives the wait; a bad estimate makes
   retries either too eager or too slow. `dm_ack_timeout_seconds` is the override.
 
 ## Future work
 
-- Per-player delivery health: a rolling failure rate in `session_state`, so a player whose link has
-  been dead for N consecutive packets stops receiving watcher fan-out until they say something.
+- Per-recipient delivery health: a rolling failure rate keyed on `pubkey_prefix`, fed only by the
+  player path's ACK data, used to suppress *fan-out* to someone whose link has been dead for N
+  consecutive packets. That reaches the dead-watcher case without ACK-waiting fan-out itself, since
+  most watchers are also players and produce measured traffic of their own.
 - Admin UI: delivery rate per player and over time, from the `acked` column.
 - Adaptive attempts: more retries for the first packet of a response (the one whose loss costs the
   player the whole reply) than for the tail.
