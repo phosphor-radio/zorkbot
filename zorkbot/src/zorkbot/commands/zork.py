@@ -35,7 +35,7 @@ def _dm_help_packet_2(channel_name: str, *, in_session: bool) -> str:
     lines = ["!watchers — list all observers", "!reset — wipe save & restart"]
     if in_session:
         lines.append("!rules — basic rules")
-    lines.append(f"Join {channel_name} and send !help for more info.")
+    lines.append(f"Join {channel_name} and send !help for more info")
     return "\n".join(lines)
 
 
