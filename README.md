@@ -379,6 +379,7 @@ game_url = "http://game:8080"   # Docker; use http://localhost:8080 for local de
 
 packet_max_chars = 120          # max chars per outgoing radio message
 announce_on_start = false
+log_level = "INFO"              # CRITICAL / ERROR / WARNING / INFO / DEBUG
 
 # Session management
 max_watchers_per_session = 2    # observers per session
@@ -475,6 +476,14 @@ That makes an undelivered packet the slow case, bounded by
 you have not measured, set `dm_ack_max_attempts = 1` first: that waits for the
 ACK and records the outcome without ever retransmitting, so the real delivery
 rate is visible before any airtime is spent on retries.
+
+Received messages are logged individually at INFO; transmitted ones are not,
+since a busy channel would put a line in the log for every packet to every
+recipient, and the admin DB already keeps the same facts queryably. Set
+`log_level = "DEBUG"` to log each transmission as well - `tx dm player=aabbccdd
+chars=118 acked=True queue=1` - covering DMs, channel packets and watcher
+fan-out alike. Adverts are logged at INFO by the advertiser, and retries by the
+meshcore library, so neither needs DEBUG to be visible.
 
 **A response stops at the packet that failed.** Once a packet has exhausted
 its attempts, the rest of that response would each cost several more
@@ -729,6 +738,7 @@ protection is network isolation: the `game` service is `expose`d (container-netw
 | `game` build: `zorkbot-encrusted:1.1.0 ... pull access denied` | The active buildx builder uses the `docker-container` driver and can't see local images; `docker buildx use default` |
 | SD card filling with logs | Compose caps logs at 10 MB × 3 files per service |
 | Follow one player in logs | `docker compose logs zorkbot \| grep player=<prefix8>` |
+| See every packet the bot transmits | `log_level = "DEBUG"`; each send logs `tx <transport> player=… chars=… acked=… queue=…` |
 
 ## Repository layout
 

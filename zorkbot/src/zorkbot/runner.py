@@ -569,6 +569,25 @@ class MeshCoreRunner:
                             self.bot.config.dm_ack_max_attempts,
                         )
                     if record:
+                        # The only per-packet record of an outgoing message in
+                        # the log. Off at INFO on purpose: on a busy channel
+                        # this is a line per packet per recipient, and the
+                        # admin DB already keeps the same facts queryably.
+                        # Every argument is cheap and unformatted, so nothing
+                        # is built unless DEBUG is actually on. Adverts are
+                        # excluded with the rest of record=False - the
+                        # advertiser logs those itself, at INFO.
+                        logger.debug(
+                            # queue depth counts this packet, so a quiet bot
+                            # reads queue=1 rather than queue=0.
+                            "tx %s player=%s channel=%s chars=%d acked=%s queue=%d",
+                            transport,
+                            (pubkey_prefix or "-")[:8],
+                            channel_idx,
+                            chars,
+                            acked,
+                            self._send_queue_depth,
+                        )
                         self.bot.event_sink.message_tx(
                             transport=transport,
                             channel_idx=channel_idx,

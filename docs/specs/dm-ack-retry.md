@@ -272,7 +272,8 @@ defaulting to 2 rather than 1, and a small `max_attempts`.
 Phase 1 keeps the reaction minimal and observational:
 
 - **Log it.** One `WARNING` per undelivered packet: player prefix, character count, attempts made.
-  Nothing per attempt at INFO — a flapping link would drown the log.
+  Nothing per attempt at INFO — a flapping link would drown the log. Successful sends log a `tx …`
+  line at DEBUG only, carrying `acked=` alongside transport, recipient and size.
 - **Record it.** `message_tx` gains `acked: bool | None`; `None` means "not measured" (channel
   messages, watcher fan-out, `dm_ack_enabled = false`, and the overflow-drop path, which already
   records `dropped=True`).
