@@ -302,8 +302,11 @@ class MeshCoreRunner:
         self._record_rx(message)
         self._note_channel_rx()
 
-        async def reply(text: str) -> None:
+        async def reply(text: str) -> bool:
+            # A channel message is a broadcast with no per-recipient ACK, so
+            # delivery is never measured and a reply is never abandoned.
             await self._send_chan_msg(message.channel_idx, text)
+            return True
 
         await self.bot.dispatch_channel(message, reply)
 
@@ -318,8 +321,9 @@ class MeshCoreRunner:
         self._record_rx(message)
         self._note_channel_rx()
 
-        async def reply(text: str) -> None:
+        async def reply(text: str) -> bool:
             await self._send_chan_msg(message.channel_idx, text)
+            return True
 
         await self.bot.dispatch_bots_channel(message, reply)
 
@@ -367,9 +371,13 @@ class MeshCoreRunner:
         )
         self._record_rx(message)
 
-        async def reply(reply_text: str) -> None:
-            if pubkey_prefix:
-                await self._send_dm(pubkey_prefix, reply_text)
+        async def reply(reply_text: str) -> bool:
+            if not pubkey_prefix:
+                # Nothing to send to, so nothing was measured. True, not
+                # False: False means a measured delivery failure and would
+                # truncate the rest of the response.
+                return True
+            return await self._send_dm(pubkey_prefix, reply_text)
 
         await self.bot.dispatch_dm(message, reply)
 

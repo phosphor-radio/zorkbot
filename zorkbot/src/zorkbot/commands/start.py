@@ -74,12 +74,22 @@ async def handle_start(
         f"Zork I Session #{record.num} started. Type your commands here in DM!"
     )
     if ctx.is_dm:
-        await ctx.reply(intro)
+        delivered = await ctx.reply(intro)
     else:
         # Acknowledge on channel, send intro via DM.
         await ctx.reply(
             f"Zork I Session #{record.num} started for {player_name} - check your DMs!"
         )
-        await send_dm_func(player_id, intro)
+        delivered = await send_dm_func(player_id, intro) is not False
+
+    # The look is several more packets down the same link the intro just
+    # failed on, and the session is already started - the player can ask for
+    # it themselves once they are back in range.
+    if not delivered and ctx.config.dm_ack_abandon_response:
+        logger.warning(
+            "session=%d intro not delivered to player=%s - skipping initial look",
+            record.num, player_id[:8],
+        )
+        return
 
     await send_initial_look(ctx, game, player_id, send_dm_func)

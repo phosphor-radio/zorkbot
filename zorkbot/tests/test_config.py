@@ -186,3 +186,11 @@ def test_dm_ack_can_be_disabled(tmp_path: Path) -> None:
     config_path = tmp_path / "zorkbot.toml"
     config_path.write_text("dm_ack_enabled = false\n")
     assert load_config(config_path).dm_ack_enabled is False
+
+
+def test_dm_ack_abandon_response_can_be_disabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("dm_ack_abandon_response = false\n")
+    config = load_config(config_path)
+    assert config.dm_ack_abandon_response is False
+    assert BotConfig().dm_ack_abandon_response is True

@@ -399,6 +399,7 @@ dm_ack_max_attempts = 3         # transmissions per packet, first included
 dm_ack_max_flood_attempts = 2   # lower cap for a flood-routed contact
 dm_ack_flood_after = 2          # failed direct tries before a path reset
 dm_ack_timeout_seconds = 0.0    # 0 = use the firmware's suggested timeout
+dm_ack_abandon_response = true  # stop a response after a failed packet
 
 # Mesh bot discovery (!bots roll call) — a separate channel from the game
 # lobby below. Disabled by default; requires both bots_enabled and
@@ -468,6 +469,14 @@ That makes an undelivered packet the slow case, bounded by
 you have not measured, set `dm_ack_max_attempts = 1` first: that waits for the
 ACK and records the outcome without ever retransmitting, so the real delivery
 rate is visible before any airtime is spent on retries.
+
+**A response stops at the packet that failed.** Once a packet has exhausted
+its attempts, the rest of that response would each cost several more
+transmissions on a link that has just proved it is not carrying traffic, so
+they are not sent (`dm_ack_abandon_response`, default on). The session is
+untouched and the player's next command works normally once they are back in
+range. `!start` follows the same rule: an intro that does not arrive is not
+chased with the opening room description.
 
 **Watcher fan-out is deliberately not acknowledged.** A lost watcher packet
 costs a fragment of someone else's game; a lost player packet costs that player

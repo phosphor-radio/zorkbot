@@ -328,6 +328,7 @@ dropped with a warning log.
 | `dm_ack_max_flood_attempts` | 2 | Lower cap when the contact is flood-routed or unknown |
 | `dm_ack_flood_after` | 2 | Failed direct attempts before the contact's path is reset to flood |
 | `dm_ack_timeout_seconds` | 0.0 | ACK wait per attempt; 0 uses the firmware's suggested timeout |
+| `dm_ack_abandon_response` | true | Stop sending the rest of a response once one of its packets has failed |
 | `bots_enabled` | false | Enable `!bots` roll-call handling; requires `[bots_channel]` too |
 | `[bots_channel] index` / `name` | none | Dedicated channel `!bots` listens on — separate from `[channel]` |
 | `[admin] pubkeys` | [] | Pubkey prefixes (12 hex chars) of admin users |

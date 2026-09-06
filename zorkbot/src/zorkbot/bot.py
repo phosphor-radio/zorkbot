@@ -443,9 +443,10 @@ class ZorkBot:
             accepted=True,
         )
 
-        async def send_dm(pubkey_prefix: str, text: str) -> None:
-            if self._send_dm:
-                await self._send_dm(pubkey_prefix, text)
+        async def send_dm(pubkey_prefix: str, text: str) -> bool:
+            if not self._send_dm:
+                return True
+            return await self._send_dm(pubkey_prefix, text) is not False
 
         async def send_watcher_dm(pubkey_prefix: str, text: str) -> None:
             sender = self._watcher_sender

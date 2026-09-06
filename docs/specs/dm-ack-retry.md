@@ -1,7 +1,7 @@
 # DM delivery ACKs and retry
 
-**Status:** Phase 1 implemented on `spec/dm-ack-retry`. Phase 3 (abandoning the rest of a dead
-response) not started.
+**Status:** Implemented on `spec/dm-ack-retry` — the ACK path and its stats (Phase 1), the admin
+UI surface (Phase 2), and abandoning the rest of a dead response (Phase 3).
 **Related:** [dm-sessions.md](dm-sessions.md) (RF Send Serialization), commit `4299d06` (airtime, byte budget, lost first packets)
 
 ## Problem
@@ -279,7 +279,7 @@ Phase 1 keeps the reaction minimal and observational:
 - **Nothing else.** No apology DM, no session teardown, no requeue. The session stays live; the
   player's next command works normally if the link recovers.
 
-### 7. Abandoning the rest of a dead response (optional, Phase 3)
+### 7. Abandoning the rest of a dead response (Phase 3)
 
 Once a packet has failed every attempt, spending the remaining packets of the same response on the
 same link is airtime spent on a link that just proved it is not carrying traffic — and with retries
@@ -287,7 +287,7 @@ each of those costs several transmissions, not one.
 
 This needs the delivery result to reach the reply loops, which today discard it:
 
-- `ReplyFunc` is `Callable[[str], Awaitable[None]]` ([context.py:15](../../zorkbot/src/zorkbot/context.py:15)) — becomes `Awaitable[bool]`.
+- `ReplyFunc` is `Callable[[str], Awaitable[None]]` ([context.py:15](../../zorkbot/src/zorkbot/context.py:15)) — becomes `Awaitable[bool | None]`. `None` is deliberately still in the type: a sender that does not measure delivery must not be read as reporting failure.
 - `Context.reply_many` ([context.py:58](../../zorkbot/src/zorkbot/context.py:58)) stops on the first `False` and returns it.
 - The player-facing per-packet DM loops in
   [zork.py:101](../../zorkbot/src/zorkbot/commands/zork.py:101) and
@@ -298,6 +298,11 @@ This needs the delivery result to reach the reply loops, which today discard it:
   behaviour they can have.
 - The simulator's `_on_dm_send` ([simulator.py:37](../../zorkbot/src/zorkbot/simulator.py:37))
   returns `True` unconditionally; it has no radio and nothing to measure.
+
+**Only an explicit `False` counts.** Every unmeasured sender — channel replies, the simulator, an
+embedder that has not been updated, every test double — returns `None`, and treating that as a
+failure would truncate every multi-packet reply that went through one. The check is
+`is False`, never a truthiness test, at each of the three sites.
 
 Gated by `dm_ack_abandon_response` (default `true`), so the behaviour can be turned off without
 reverting the plumbing. Deliberately split out of Phase 1: it changes a signature threaded through
@@ -333,7 +338,7 @@ switched on.
 
 ---
 
-## Observability
+## Observability (Phase 2)
 
 `message_tx` gains `acked: bool | None = None` on the protocol, `NullEventSink`, and
 `SqliteEventSink` ([events.py:31](../../zorkbot/src/zorkbot/admin/events.py:31),
@@ -374,6 +379,16 @@ SELECT SUM(acked = 1) AS delivered, SUM(acked = 0) AS failed
 FROM messages
 WHERE direction = 'tx' AND transport = 'dm' AND acked IS NOT NULL AND at >= ?
 ```
+
+Two surfaces, both in the admin UI:
+
+- **`GET /stats/delivery`** returns `{t, delivered, failed}` buckets in the same shape as the other
+  stats endpoints, rendered as a two-series chart with the overall rate in its heading.
+- **`GET /players`** gains `dms_delivered` / `dms_undelivered` per player, shown as a rate column —
+  which player's link is bad is a more actionable question than the fleet average.
+
+An empty denominator renders as "—", never 0%: a bot that has only ever sent watcher fan-out and
+channel traffic has measured nothing, which is not the same as having failed everything.
 
 ---
 
@@ -453,8 +468,9 @@ On hardware, with `dm_ack_max_attempts = 1` first:
   text again — and since the attempt counter is part of the payload, it is a distinct packet that
   will not be deduped. The player sees a room description twice. Annoying, harmless, and a further
   argument for a small `max_attempts`.
-- **Per-packet, not per-response.** Each packet is acknowledged independently. Without Phase 3, a
-  response whose packet 2 fails still transmits packet 3.
+- **Per-packet, not per-response.** Each packet is acknowledged independently; Phase 3 stops the
+  rest of a response after a failure, but nothing retries the response as a whole. A player whose
+  link recovers sees a truncated reply, not a resent one, and has to ask again.
 - **Watcher delivery stays unknown.** By design, but it does mean a watcher can silently stop
   receiving a session — the same failure mode players have today — and neither they nor the bot
   will know. `!watch` is best-effort, and re-issuing it costs one packet. If this turns out to
@@ -469,9 +485,14 @@ On hardware, with `dm_ack_max_attempts = 1` first:
   that can tell a delivery failure from a queue-overflow drop — both surface to `_send_dm` as
   `None` — so logging there is what keeps an overflow from being reported twice, once as an
   overflow and once as a non-delivery.
-- **Nothing in the admin UI reads `acked` yet.** The column, the migration and the sink plumbing
-  land in Phase 1; surfacing a delivery rate in the UI stays where the spec left it, under Future
-  work.
+- **`ReplyFunc` returns `bool | None`, not `bool`.** The spec said `Awaitable[bool]`. Making it
+  strictly `bool` would mean every unmeasured sender had to be found and updated, and any one
+  missed would silently truncate replies — so `None` stays legal and means "not measured", and only
+  an explicit `False` abandons a response.
+- **`!start` and `!reset` skip the initial look when their confirmation was not delivered.** Not in
+  the spec, which described the packet loops only. The look is several more packets down the link
+  that just failed, and it is the same argument one call frame up; the session is started (or
+  reset) either way, so the player loses nothing but the automatic room description.
 
 ## Future work
 

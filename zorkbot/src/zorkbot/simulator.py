@@ -39,8 +39,12 @@ class Simulator:
         # watcher fan-out or inactivity notifications).
         self._pending_dms: list[str] = []
 
-    async def _on_dm_send(self, pubkey_prefix: str, text: str) -> None:
-        """Capture outgoing DMs and add them to the pending display buffer."""
+    async def _on_dm_send(self, pubkey_prefix: str, text: str) -> bool:
+        """Capture outgoing DMs and add them to the pending display buffer.
+
+        Always "delivered": there is no radio here, so nothing is measured and
+        no response should ever be cut short.
+        """
         # Resolve a display name for the recipient.
         name = pubkey_prefix[:8]
         mc = getattr(self.bot, "meshcore", None)
@@ -49,6 +53,7 @@ class Simulator:
             if contact:
                 name = contact.get("adv_name", name)
         self._pending_dms.append(f"[DM → {name}] {text}")
+        return True
 
     @property
     def prompt(self) -> str:

@@ -679,3 +679,50 @@ async def test_start_injects_both_senders() -> None:
 
     assert bot.set_send_dm.call_args.args[0] == runner._send_dm_packets
     assert bot.set_send_watcher_dm.call_args.args[0] == runner._send_watcher_dm
+
+
+@pytest.mark.asyncio
+async def test_dm_reply_closure_reports_delivery() -> None:
+    """The bot's reply path is what carries the ACK result back up to
+    Context.reply_many, which is what decides to abandon a response."""
+    runner, mc = _make_gate_runner()
+    mc.commands.send_msg_with_retry = AsyncMock(return_value=None)
+    runner.bot.dispatch_dm = AsyncMock()
+
+    await runner._on_dm_msg(
+        Event(EventType.CONTACT_MSG_RECV, {"pubkey_prefix": PUBKEY_PREFIX, "text": "look"})
+    )
+
+    reply = runner.bot.dispatch_dm.await_args.args[1]
+    assert await reply("a packet") is False
+
+    mc.commands.send_msg_with_retry = AsyncMock(return_value="ok")
+    assert await reply("another") is True
+
+
+@pytest.mark.asyncio
+async def test_dm_reply_closure_without_a_sender_is_not_a_failure() -> None:
+    """An unidentifiable sender means nothing was measured. False would
+    truncate the rest of a response over a link that never failed."""
+    runner, _ = _make_gate_runner()
+    runner.bot.dispatch_dm = AsyncMock()
+
+    await runner._on_dm_msg(Event(EventType.CONTACT_MSG_RECV, {"text": "look"}))
+
+    reply = runner.bot.dispatch_dm.await_args.args[1]
+    assert await reply("a packet") is True
+
+
+@pytest.mark.asyncio
+async def test_channel_reply_closure_never_reports_failure() -> None:
+    """A broadcast has no per-recipient ACK, so nothing is measured."""
+    runner, _ = _make_gate_runner()
+    runner.bot.config.channel.index = 1
+    runner.bot.dispatch_channel = AsyncMock()
+
+    await runner._on_channel_msg(
+        Event(EventType.CHANNEL_MSG_RECV, {"channel_idx": 1, "text": "!help"})
+    )
+
+    reply = runner.bot.dispatch_channel.await_args.args[1]
+    assert await reply("a packet") is True

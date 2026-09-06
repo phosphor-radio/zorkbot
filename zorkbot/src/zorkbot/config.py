@@ -38,6 +38,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "dm_ack_max_flood_attempts",
     "dm_ack_flood_after",
     "dm_ack_timeout_seconds",
+    "dm_ack_abandon_response",
     "bots_enabled",
     "session_poll_seconds",
 })
@@ -121,6 +122,10 @@ class BotConfig:
     # it resolves to is floored at send_spacing_seconds, since that wait is
     # also the gap before the next retransmission.
     dm_ack_timeout_seconds: float = 0.0
+    # Stop sending the rest of a multi-packet response once one of its packets
+    # has failed every attempt. Each remaining packet would cost several more
+    # transmissions on a link that has just proved it is not carrying traffic.
+    dm_ack_abandon_response: bool = True
 
     # Mesh bot discovery (!bots roll call) — a separate channel from the
     # game lobby, disabled by default, and only active once both a
@@ -219,6 +224,9 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
     dm_ack_timeout_seconds = _root_value(data, channel, admin, "dm_ack_timeout_seconds")
     if dm_ack_timeout_seconds is not None:
         config.dm_ack_timeout_seconds = float(dm_ack_timeout_seconds)
+    dm_ack_abandon_response = _root_value(data, channel, admin, "dm_ack_abandon_response")
+    if dm_ack_abandon_response is not None:
+        config.dm_ack_abandon_response = bool(dm_ack_abandon_response)
     bots_enabled = _root_value(data, channel, admin, "bots_enabled")
     if bots_enabled is None:
         bots_enabled = bots_channel.get("bots_enabled")
