@@ -21,8 +21,8 @@ class Advertiser:
     for a live server.
 
     *flood* controls the send_advert flood parameter:
-      True  — flood advert reaches the whole mesh (default; needed for DMs).
-      False — zerohop advert reaches only directly connected nodes.
+      True  - flood advert reaches the whole mesh (default; needed for DMs).
+      False - zerohop advert reaches only directly connected nodes.
     """
 
     def __init__(
@@ -39,11 +39,23 @@ class Advertiser:
         self._cooldown = cooldown_seconds
         self._last_sent_at: float = 0.0
         self._task: asyncio.Task[None] | None = None
+        # Injected by MeshCoreRunner so adverts queue behind messages on the
+        # shared send gate instead of transmitting straight away. Left unset
+        # in simulate mode, where there is no runner and nothing reaches RF.
+        self._transmit = None
+
+    def set_transmit(self, transmit) -> None:
+        """Route adverts through *transmit*, an async (flood: bool) -> Any.
+
+        An advert is a transmission like any other and has to respect
+        send_spacing_seconds; the runner's send gate is what enforces that.
+        """
+        self._transmit = transmit
 
     def start(self, meshcore: object) -> None:
         """Start the background timer task.  No-op when disabled."""
         if not self._enabled:
-            logger.debug("adverts disabled — background timer not started")
+            logger.debug("adverts disabled - background timer not started")
             return
         if self._task is None:
             self._task = asyncio.create_task(
@@ -67,7 +79,7 @@ class Advertiser:
         now = time.monotonic()
         if now - self._last_sent_at < self._cooldown:
             logger.debug(
-                "advert cooldown active (%.0fs remaining) — skipping",
+                "advert cooldown active (%.0fs remaining) - skipping",
                 self._cooldown - (now - self._last_sent_at),
             )
             return
@@ -75,9 +87,19 @@ class Advertiser:
 
     async def _send(self, meshcore: object) -> None:
         try:
-            result = await meshcore.commands.send_advert(flood=self._flood)
+            if self._transmit is not None:
+                result = await self._transmit(flood=self._flood)
+            else:
+                result = await meshcore.commands.send_advert(flood=self._flood)
+            # Stamped even when the gate dropped the advert on queue
+            # overflow: the mesh is congested either way, and retrying
+            # immediately is the wrong response to that.
             self._last_sent_at = time.monotonic()
-            logger.info("advert sent (flood=%s): %s", self._flood, result.type)
+            logger.info(
+                "advert sent (flood=%s): %s",
+                self._flood,
+                getattr(result, "type", result),
+            )
         except Exception:
             logger.exception("failed to send advert")
 

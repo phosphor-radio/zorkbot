@@ -32,6 +32,7 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "advert_cooldown_seconds",
     "send_spacing_seconds",
     "max_send_queue_depth",
+    "channel_rx_guard_seconds",
     "bots_enabled",
     "session_poll_seconds",
 })
@@ -85,6 +86,14 @@ class BotConfig:
     # RF send serialization
     send_spacing_seconds: float = 2.0
     max_send_queue_depth: int = 64
+    # Quiet period after receiving a channel message before the bot is
+    # allowed to transmit. A channel message is a flood: neighbouring nodes
+    # are still repeating it when the bot's reply would otherwise go out, so
+    # the first packet of that reply is the one most likely to collide.
+    # Spacing does not cover it - spacing measures the gap since the bot's
+    # own previous transmission, and the first packet has none. DMs are
+    # addressed rather than flooded, so they are not guarded.
+    channel_rx_guard_seconds: float = 2.0
 
     # Mesh bot discovery (!bots roll call) — a separate channel from the
     # game lobby, disabled by default, and only active once both a
@@ -165,6 +174,9 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
         config.send_spacing_seconds = float(send_spacing_seconds)
     if max_send_queue_depth := _root_value(data, channel, admin, "max_send_queue_depth"):
         config.max_send_queue_depth = int(max_send_queue_depth)
+    channel_rx_guard_seconds = _root_value(data, channel, admin, "channel_rx_guard_seconds")
+    if channel_rx_guard_seconds is not None:
+        config.channel_rx_guard_seconds = float(channel_rx_guard_seconds)
     bots_enabled = _root_value(data, channel, admin, "bots_enabled")
     if bots_enabled is None:
         bots_enabled = bots_channel.get("bots_enabled")

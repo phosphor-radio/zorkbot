@@ -21,7 +21,7 @@ from zorkbot.context import IncomingMessage
 logger = logging.getLogger(__name__)
 
 STARTUP_MESSAGE = (
-    "Zork I is live — DM me !start to begin your private session. "
+    "Zork I is live - DM me !start to begin your private session. "
     "Use !list, !watch, !help on this channel."
 )
 
@@ -147,11 +147,17 @@ class MeshCoreRunner:
         # Unified send lock: all RF transmissions (channel + DM) serialized here.
         self._send_lock = asyncio.Lock()
         self._last_send_at: float | None = None
+        # When a channel message last arrived. The mesh is still repeating
+        # that flood for a moment afterwards, so transmissions hold off for
+        # channel_rx_guard_seconds past it - see _send_with_spacing.
+        self._last_channel_rx_at: float | None = None
         # Running total of packets pending in the lock queue.
         self._send_queue_depth: int = 0
 
-        # Use the advertiser owned by the bot so cooldown state is shared.
+        # Use the advertiser owned by the bot so cooldown state is shared,
+        # and route its transmissions through this runner's send gate.
         self.advertiser = bot.advertiser
+        self.advertiser.set_transmit(self.send_advert)
 
     async def start(self) -> None:
         # Without this, the library only refreshes its local contact cache
@@ -292,6 +298,7 @@ class MeshCoreRunner:
             message.text,
         )
         self._record_rx(message)
+        self._note_channel_rx()
 
         async def reply(text: str) -> None:
             await self._send_chan_msg(message.channel_idx, text)
@@ -307,11 +314,15 @@ class MeshCoreRunner:
             message.text,
         )
         self._record_rx(message)
+        self._note_channel_rx()
 
         async def reply(text: str) -> None:
             await self._send_chan_msg(message.channel_idx, text)
 
         await self.bot.dispatch_bots_channel(message, reply)
+
+    def _note_channel_rx(self) -> None:
+        self._last_channel_rx_at = asyncio.get_running_loop().time()
 
     def _record_rx(self, message: IncomingMessage) -> None:
         if message.pubkey_prefix:
@@ -376,6 +387,23 @@ class MeshCoreRunner:
             chars=len(text),
         )
 
+    async def send_advert(self, *, flood: bool) -> Any:
+        """Transmit an advert through the same gate as messages.
+
+        An advert is RF like anything else - a flood advert reaches further
+        than any message the bot sends - so it queues behind whatever is
+        already going out rather than jumping the line.
+        """
+        return await self._send_with_spacing(
+            self.meshcore.commands.send_advert(flood=flood),
+            # Not recorded in message_tx: the stats tables count messages by
+            # dm/channel transport, and "both" there means the sum of the
+            # two. Adding a third value would quietly break that. Advert
+            # airtime staying unaccounted is pre-existing, and a separate
+            # question from whether adverts respect the send gate.
+            record=False,
+        )
+
     async def _send_chan_msg(self, channel_idx: int, text: str) -> Event:
         return await self._send_with_spacing(
             self.meshcore.commands.send_chan_msg(channel_idx, text),
@@ -383,6 +411,40 @@ class MeshCoreRunner:
             channel_idx=channel_idx,
             chars=len(text),
         )
+
+    async def _wait_for_quiet_air(self) -> None:
+        """Hold the send lock until it is this transmission's turn on the air.
+
+        Two deadlines, tracked independently and both enforced:
+
+        - send_spacing_seconds after the bot's own last transmission,
+        - channel_rx_guard_seconds after the last channel message arrived.
+
+        Whichever falls later governs. Neither overrides the other: a long
+        spacing that happens to outlast the guard satisfies it on the way
+        past, and with nothing recently transmitted the guard governs on its
+        own - a reply to a channel command goes out once the flood has
+        settled rather than waiting on a spacing gap that isn't there.
+
+        Re-checked after every sleep, so a channel message that arrives
+        while this transmission is already waiting re-arms the guard instead
+        of being missed. The guard is deliberately not scoped to the reply
+        for one particular message: the mesh is busy repeating the flood
+        regardless of which of the bot's packets is next in line.
+        """
+        while True:
+            now = asyncio.get_running_loop().time()
+            deadlines = []
+            if self._last_send_at is not None:
+                deadlines.append(self._last_send_at + self.bot.config.send_spacing_seconds)
+            if self._last_channel_rx_at is not None:
+                deadlines.append(
+                    self._last_channel_rx_at + self.bot.config.channel_rx_guard_seconds
+                )
+            remaining = max((deadline - now for deadline in deadlines), default=0.0)
+            if remaining <= 0:
+                return
+            await asyncio.sleep(remaining)
 
     async def _send_with_spacing(
         self,
@@ -392,37 +454,40 @@ class MeshCoreRunner:
         channel_idx: int | None = None,
         pubkey_prefix: str | None = None,
         chars: int = 0,
+        record: bool = True,
     ) -> Any:
         max_depth = self.bot.config.max_send_queue_depth
         if self._send_queue_depth >= max_depth:
             logger.warning(
-                "send queue overflow (depth=%d) — dropping packet", self._send_queue_depth
+                "send queue overflow (depth=%d) - dropping packet", self._send_queue_depth
             )
-            self.bot.event_sink.message_tx(
-                transport=transport,
-                channel_idx=channel_idx,
-                pubkey_prefix=pubkey_prefix,
-                chars=chars,
-                dropped=True,
-            )
+            # coro was built by the caller and is never awaited on this path;
+            # close it so it doesn't surface as a "never awaited" RuntimeWarning
+            # right when the log is being read for the overflow itself.
+            coro.close()
+            if record:
+                self.bot.event_sink.message_tx(
+                    transport=transport,
+                    channel_idx=channel_idx,
+                    pubkey_prefix=pubkey_prefix,
+                    chars=chars,
+                    dropped=True,
+                )
             return None
 
         self._send_queue_depth += 1
         try:
             async with self._send_lock:
-                if self._last_send_at is not None:
-                    elapsed = asyncio.get_running_loop().time() - self._last_send_at
-                    remaining = self.bot.config.send_spacing_seconds - elapsed
-                    if remaining > 0:
-                        await asyncio.sleep(remaining)
+                await self._wait_for_quiet_air()
                 try:
                     result = await coro
-                    self.bot.event_sink.message_tx(
-                        transport=transport,
-                        channel_idx=channel_idx,
-                        pubkey_prefix=pubkey_prefix,
-                        chars=chars,
-                    )
+                    if record:
+                        self.bot.event_sink.message_tx(
+                            transport=transport,
+                            channel_idx=channel_idx,
+                            pubkey_prefix=pubkey_prefix,
+                            chars=chars,
+                        )
                     return result
                 finally:
                     self._last_send_at = asyncio.get_running_loop().time()

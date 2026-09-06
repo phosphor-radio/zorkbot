@@ -1,4 +1,10 @@
-from zorkbot.packetize import _looks_like_title, packetize, strip_ansi
+from zorkbot.packetize import (
+    _looks_like_title,
+    add_sequence_prefixes,
+    pack_lines,
+    packetize,
+    strip_ansi,
+)
 
 
 def test_strip_ansi_removes_color_codes() -> None:
@@ -189,3 +195,31 @@ def test_packetize_first_line_alone_with_no_body() -> None:
 def test_packetize_no_first_line_is_unaffected() -> None:
     packets = packetize("Taken.", max_chars=100, numbered=False)
     assert packets == ["Taken."]
+
+
+def test_pack_lines_keeps_whole_lines_within_budget() -> None:
+    lines = ["a" * 30, "b" * 30, "c" * 30]
+    packets = pack_lines(lines, max_chars=80)
+
+    # Budget reserves room for the sequence prefix, so two 30-char lines
+    # (61 chars with the newline) fit and three do not.
+    assert packets == ["a" * 30 + "\n" + "b" * 30, "c" * 30]
+    assert all(len(p) <= 80 - len("(99/99) ") for p in packets)
+
+
+def test_pack_lines_never_splits_a_line_that_exceeds_the_budget() -> None:
+    """Better one oversized packet than a command name cut in half."""
+    packets = pack_lines(["x" * 500], max_chars=80)
+    assert packets == ["x" * 500]
+
+
+def test_add_sequence_prefixes_leaves_a_lone_packet_alone() -> None:
+    assert add_sequence_prefixes(["only"]) == ["only"]
+
+
+def test_add_sequence_prefixes_numbers_multiple_packets() -> None:
+    assert add_sequence_prefixes(["one", "two", "three"]) == [
+        "(1/3) one",
+        "(2/3) two",
+        "(3/3) three",
+    ]

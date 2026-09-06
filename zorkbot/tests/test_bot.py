@@ -1277,3 +1277,39 @@ async def test_admin_end_requires_admin_pubkey() -> None:
         await bot.drain()
 
     assert any("not authorized" in r.lower() for r in replies)
+
+
+def test_help_packets_are_numbered_ascii_and_within_budget() -> None:
+    """Every property this reply depends on, in one place.
+
+    The radio counts bytes while packet_max_chars counts characters, so a
+    non-ASCII character silently costs 2-3x its budgeted size. Numbering
+    matters because the first packet is the one most likely to be lost and
+    an unnumbered help reply reads as complete when it isn't.
+    """
+    from zorkbot.commands.zork import channel_help_packets, dm_help_packets
+
+    budget = BotConfig().packet_max_chars
+    groups = {
+        "channel": channel_help_packets(budget),
+        "dm": dm_help_packets("#zork", in_session=False, max_chars=budget),
+        "dm in-session": dm_help_packets("#zork", in_session=True, max_chars=budget),
+        "dm long channel name": dm_help_packets(
+            "#a-rather-long-channel-name", in_session=True, max_chars=budget
+        ),
+    }
+
+    for label, packets in groups.items():
+        assert len(packets) > 1, label
+        for index, packet in enumerate(packets, start=1):
+            assert packet.startswith(f"({index}/{len(packets)}) "), (label, packet)
+            assert packet.isascii(), (label, packet)
+            assert len(packet.encode()) <= budget, (label, len(packet.encode()), packet)
+
+
+def test_help_text_uses_the_shortened_command_descriptions() -> None:
+    from zorkbot.commands.zork import channel_help_packets
+
+    first = channel_help_packets()[0]
+    assert "!start - begin/resume game" in first
+    assert "!watch <N> - observe session" in first

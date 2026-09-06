@@ -388,8 +388,10 @@ advert_interval_seconds = 300   # background advert timer
 advert_cooldown_seconds = 300   # min gap between adverts
 
 # RF send serialization
-send_spacing_seconds = 2.0      # min gap between radio transmissions
+send_spacing_seconds = 2.0      # min gap between the bot's transmissions
 max_send_queue_depth = 64       # max queued packets before drops
+channel_rx_guard_seconds = 2.0  # quiet period after a channel message
+                                # arrives, before the bot may transmit
 
 # Mesh bot discovery (!bots roll call) — a separate channel from the game
 # lobby below. Disabled by default; requires both bots_enabled and
@@ -436,6 +438,40 @@ scales with the number of *active players* rather than with how fast anyone
 types. `send_spacing_seconds` then paces what actually goes out, and
 `max_send_queue_depth` overflow becomes a genuine last resort instead of the
 de-facto limiter.
+
+**Spacing covers every transmission, including adverts.** DM packets, channel
+packets and adverts all queue on one lock with one clock, so an advert - a
+flood advert reaches further than any message the bot sends - waits its turn
+behind whatever game traffic is already going out rather than transmitting on
+top of it.
+
+**`channel_rx_guard_seconds` covers the packet spacing cannot.**
+`send_spacing_seconds` measures the gap since the bot's *own* previous
+transmission, so it has nothing to say about the first packet of a reply: that
+one goes out as fast as the handler produces it. A channel message is a flood,
+and neighbouring nodes are still repeating it at that moment, so the first
+packet is the one most likely to be lost - which shows up as a reply that
+starts at page 2. `!help` is the sharpest case, since it does no I/O at all
+and so has not even an incidental delay in front of it. The guard holds
+transmissions off until the configured quiet period has passed since the last
+channel message arrived. DMs are addressed rather than flooded and are not
+guarded. Set it to 0 to disable.
+
+The two are independent deadlines and neither overrides the other. Whichever
+falls later governs: a `send_spacing_seconds` longer than the guard satisfies
+it on the way past, and with nothing recently transmitted the guard governs on
+its own, so a reply goes out once the flood has settled rather than waiting on
+a spacing gap that isn't there. The deadline is re-checked after each wait, so
+a channel message arriving while a packet is already queued re-arms the guard
+rather than slipping past it.
+
+The guard is not scoped to the reply for one particular message: while the air
+is busy repeating a flood, it is busy for every packet the bot might send, so
+whichever transmission is next in line waits. On a channel with constant
+traffic that means sends are paced by the guard, and a queue that cannot drain
+eventually hits `max_send_queue_depth`. Multi-packet replies also carry
+`(x/y)` markers, so a lost packet reads as a gap rather than as the whole
+answer.
 
 **`!end` is exempt.** It is a player's only way to stop a runaway session, so it
 is queued behind the in-flight response rather than dropped. One interrupt may
