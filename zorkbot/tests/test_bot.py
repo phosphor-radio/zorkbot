@@ -211,7 +211,7 @@ def test_dm_help_packets_point_back_to_the_configured_channel() -> None:
 
     for in_session in (False, True):
         text = "\n".join(dm_help_packets("#some-other-channel", in_session=in_session))
-        assert "Join #some-other-channel and send !help for more info." in text
+        assert "Join #some-other-channel and send !help for more info" in text
         assert "#zork" not in text
 
 
@@ -376,7 +376,7 @@ async def test_help_via_dm_mentions_the_game_channel() -> None:
         await bot.drain()
 
     assert any(
-        "Join #some-other-channel and send !help for more info." in r for r in replies
+        "Join #some-other-channel and send !help for more info" in r for r in replies
     ), f"Got: {replies}"
 
 
