@@ -22,7 +22,7 @@ async def handle_end(
     game: GameClient,
     state: SessionState,
     args: str,
-    send_dm_func,   # async (pubkey_prefix, text) -> None
+    send_watcher_dm_func,   # async (pubkey_prefix, text) -> None
     fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
     player_id = ctx.pubkey_prefix
@@ -33,7 +33,7 @@ async def handle_end(
     # Admin force-end: !end <N>
     if args.strip():
         await _handle_admin_end(
-            ctx, game, state, args.strip(), send_dm_func, fanout_func
+            ctx, game, state, args.strip(), send_watcher_dm_func, fanout_func
         )
         return
 
@@ -61,7 +61,10 @@ async def handle_end(
         # notice behind any of that session's output still being delivered,
         # so no watcher is told the session ended and then sent more of it.
         if record is not None:
-            fanout_func(record.num, notify_watchers_session_ended(send_dm_func, record))
+            fanout_func(
+                record.num,
+                notify_watchers_session_ended(send_watcher_dm_func, record),
+            )
         return
 
     await ctx.reply("You don't have an active session or watch to end.")
@@ -72,7 +75,7 @@ async def _handle_admin_end(
     game: GameClient,
     state: SessionState,
     arg: str,
-    send_dm_func,   # async (pubkey_prefix, text) -> None
+    send_watcher_dm_func,   # async (pubkey_prefix, text) -> None
     fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
     if not ctx.is_admin():
@@ -104,4 +107,4 @@ async def _handle_admin_end(
     # Queued, not awaited — see the equivalent note in handle_end. Here it is
     # the admin's own worker that would otherwise be held busy notifying a
     # third party's watchers about someone else's session.
-    fanout_func(session_num, notify_watchers_session_ended(send_dm_func, record))
+    fanout_func(session_num, notify_watchers_session_ended(send_watcher_dm_func, record))

@@ -1,6 +1,7 @@
 # DM delivery ACKs and retry
 
-**Status:** Proposed
+**Status:** Phase 1 implemented on `spec/dm-ack-retry`. Phase 3 (abandoning the rest of a dead
+response) not started.
 **Related:** [dm-sessions.md](dm-sessions.md) (RF Send Serialization), commit `4299d06` (airtime, byte budget, lost first packets)
 
 ## Problem
@@ -461,6 +462,16 @@ On hardware, with `dm_ack_max_attempts = 1` first:
   per response), not the output stream.
 - **`suggested_timeout` is trusted.** The firmware's estimate drives the wait; a bad estimate makes
   retries either too eager or too slow. `dm_ack_timeout_seconds` is the override.
+
+## Deviations from this spec
+
+- **The failure warning is logged in `_send_with_spacing`, not `_send_dm`.** That is the only place
+  that can tell a delivery failure from a queue-overflow drop — both surface to `_send_dm` as
+  `None` — so logging there is what keeps an overflow from being reported twice, once as an
+  overflow and once as a non-delivery.
+- **Nothing in the admin UI reads `acked` yet.** The column, the migration and the sink plumbing
+  land in Phase 1; surfacing a delivery rate in the UI stays where the spec left it, under Future
+  work.
 
 ## Future work
 

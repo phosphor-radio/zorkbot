@@ -20,7 +20,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -92,7 +92,13 @@ CREATE TABLE IF NOT EXISTS messages (
   channel_idx   INTEGER,
   pubkey_prefix TEXT,
   chars         INTEGER NOT NULL,
-  dropped       INTEGER NOT NULL DEFAULT 0
+  dropped       INTEGER NOT NULL DEFAULT 0,
+  -- 1/0 once the recipient's delivery ACK has been waited for, NULL when it
+  -- was not. NULL is not a failure: channel messages have no per-recipient
+  -- ACK, watcher fan-out deliberately does not wait for one, and a packet
+  -- dropped on overflow never reached the air. Queries must therefore test
+  -- `acked = 0` for failures rather than `NOT acked`.
+  acked         INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_messages_at     ON messages(at, direction);
 CREATE INDEX IF NOT EXISTS idx_messages_player ON messages(pubkey_prefix, at);
@@ -106,6 +112,26 @@ _VALID_PLAYER_SORTS = {
     "messages_rx": "messages_received_from",
     "messages_tx": "messages_sent_to",
 }
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring an existing database up to _SCHEMA_VERSION.
+
+    Runs after the CREATE TABLE IF NOT EXISTS pass, so a database created
+    just now is already current and every step below is a no-op. Steps must
+    be additive and individually idempotent: this runs on every open, and
+    there is no down path.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+    if "acked" not in columns:
+        # v1 -> v2. Nullable with no default, so every pre-existing row reads
+        # as "delivery was never measured" rather than as a failure.
+        conn.execute("ALTER TABLE messages ADD COLUMN acked INTEGER")
+    conn.execute(
+        "INSERT INTO schema_meta(key, value) VALUES ('version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (str(_SCHEMA_VERSION),),
+    )
 
 
 class Store:
@@ -138,10 +164,7 @@ class Store:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
         conn.executescript(_SCHEMA)
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('version', ?)",
-            (str(_SCHEMA_VERSION),),
-        )
+        _migrate(conn)
         conn.commit()
         try:
             os.chmod(self._db_path, 0o600)

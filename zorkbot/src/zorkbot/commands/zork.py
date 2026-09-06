@@ -106,10 +106,14 @@ async def handle_game_command(
     game: GameClient,
     state: SessionState,
     command_text: str,
-    send_dm_func,   # async (pubkey_prefix, text) -> None
+    send_watcher_dm_func,   # async (pubkey_prefix, text) -> None
     fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
-    """Process a bare game command from a DM session."""
+    """Process a bare game command from a DM session.
+
+    The player's own reply goes out through ctx.reply_many; the sender passed
+    here is only ever used for watcher fan-out, which is why it is the
+    fire-and-forget one."""
     player_id = ctx.pubkey_prefix
     if not player_id:
         await ctx.reply("Cannot identify you - please send an Advert.")
@@ -182,7 +186,7 @@ async def handle_game_command(
         async def _notify_watchers() -> None:
             for watcher_id in list(record.watchers):
                 for packet in watcher_packets:
-                    await send_dm_func(watcher_id, packet)
+                    await send_watcher_dm_func(watcher_id, packet)
 
             logger.debug(
                 "game fan-out session=%d watchers=%d packets=%d",

@@ -110,3 +110,141 @@ def test_bucket_and_sort_allowlists_reject_unknown_values() -> None:
         Store.bucket_seconds("fortnight")
     with pytest.raises(ValueError):
         Store.player_sort_column("; DROP TABLE players;--")
+
+
+# ----------------------------------------------------------------------
+# Schema migration (v1 -> v2: messages.acked)
+# ----------------------------------------------------------------------
+
+# The v1 messages table, exactly as it shipped before delivery ACKs.
+_V1_MESSAGES = """
+CREATE TABLE messages (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  at            INTEGER NOT NULL,
+  direction     TEXT    NOT NULL,
+  transport     TEXT    NOT NULL,
+  channel_idx   INTEGER,
+  pubkey_prefix TEXT,
+  chars         INTEGER NOT NULL,
+  dropped       INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def _make_v1_db(path: Path) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(str(path))
+    conn.executescript(_V1_MESSAGES)
+    conn.execute(
+        "CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+    conn.execute("INSERT INTO schema_meta(key, value) VALUES ('version', '1')")
+    conn.execute(
+        "INSERT INTO messages(at, direction, transport, chars) VALUES (1, 'tx', 'dm', 10)"
+    )
+    conn.commit()
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_v1_database_gains_the_acked_column() -> None:
+    """CREATE TABLE IF NOT EXISTS leaves an existing table alone, so without
+    a migration every insert would fail on the unknown column."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "admin.db"
+        _make_v1_db(path)
+
+        s = Store(path)
+        await s.start()
+        try:
+            columns = {
+                row["name"] for row in await s.query("PRAGMA table_info(messages)")
+            }
+            assert "acked" in columns
+
+            # The pre-existing row reads as "never measured", not as a failure.
+            row = await s.query_one("SELECT acked FROM messages WHERE id = 1")
+            assert row["acked"] is None
+
+            version = await s.query_one(
+                "SELECT value FROM schema_meta WHERE key = 'version'"
+            )
+            assert version["value"] == "2"
+        finally:
+            s.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_is_idempotent() -> None:
+    """It runs on every open, and there is no down path."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "admin.db"
+        _make_v1_db(path)
+
+        for _ in range(3):
+            s = Store(path)
+            await s.start()
+            s.close()
+
+        s = Store(path)
+        await s.start()
+        try:
+            columns = [
+                row["name"] for row in await s.query("PRAGMA table_info(messages)")
+            ]
+            assert columns.count("acked") == 1
+        finally:
+            s.close()
+
+
+@pytest.mark.asyncio
+async def test_acked_round_trips(store) -> None:
+    for acked in (None, 0, 1):
+        await store.run(
+            "INSERT INTO messages(at, direction, transport, chars, acked) "
+            "VALUES (1, 'tx', 'dm', 10, ?)",
+            (acked,),
+        )
+    rows = await store.query("SELECT acked FROM messages ORDER BY id")
+    assert [row["acked"] for row in rows] == [None, 0, 1]
+
+
+@pytest.mark.asyncio
+async def test_sink_records_delivery_outcome(store) -> None:
+    """acked distinguishes delivered / not delivered / not measured."""
+    bus = SessionBus()
+    sink = SqliteEventSink(store, bus, bot_run_id="run1", queue_size=64)
+    sink.start()
+
+    sink.message_tx(
+        transport="dm", channel_idx=None, pubkey_prefix="aabbccddeeff", chars=10,
+        acked=True,
+    )
+    sink.message_tx(
+        transport="dm", channel_idx=None, pubkey_prefix="aabbccddeeff", chars=10,
+        acked=False,
+    )
+    # Watcher fan-out and channel messages: transmitted, never measured.
+    sink.message_tx(
+        transport="dm", channel_idx=None, pubkey_prefix="112233445566", chars=10,
+    )
+    sink.message_tx(transport="channel", channel_idx=1, pubkey_prefix=None, chars=10)
+    # Dropped before it ever reached the air, which is not a failed delivery.
+    sink.message_tx(
+        transport="dm", channel_idx=None, pubkey_prefix="aabbccddeeff", chars=10,
+        dropped=True,
+    )
+
+    await sink.stop()
+
+    rows = await store.query("SELECT acked, dropped FROM messages ORDER BY id")
+    assert [row["acked"] for row in rows] == [1, 0, None, None, None]
+
+    counts = await store.query_one(
+        "SELECT SUM(acked = 1) AS delivered, SUM(acked = 0) AS failed "
+        "FROM messages WHERE direction = 'tx' AND transport = 'dm' "
+        "AND acked IS NOT NULL"
+    )
+    assert counts["delivered"] == 1
+    assert counts["failed"] == 1

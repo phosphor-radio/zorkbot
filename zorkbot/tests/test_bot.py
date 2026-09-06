@@ -1313,3 +1313,96 @@ def test_help_text_uses_the_shortened_command_descriptions() -> None:
     first = channel_help_packets()[0]
     assert "!start - begin/resume game" in first
     assert "!watch <N> - observe session" in first
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_watcher_fanout_uses_the_fire_and_forget_sender() -> None:
+    """Player DMs are ACK-waited; watcher fan-out is not. The bot is what
+    decides which of the two a given DM is."""
+    watcher_id = "112233445566"
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House"})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    player_sends: list[str] = []
+    watcher_sends: list[tuple[str, str]] = []
+
+    async def send_dm(pubkey_prefix: str, text: str) -> bool:
+        player_sends.append(pubkey_prefix)
+        return True
+
+    async def send_watcher_dm(pubkey_prefix: str, text: str) -> None:
+        watcher_sends.append((pubkey_prefix, text))
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(game=game)
+        bot.set_send_dm(send_dm)
+        bot.set_send_watcher_dm(send_watcher_dm)
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        player_sends.clear()
+        watcher_sends.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await bot.drain()
+
+        # Everything the watcher got went out fire-and-forget...
+        assert watcher_sends, "watcher received nothing"
+        assert all(pubkey == watcher_id for pubkey, _ in watcher_sends), watcher_sends
+        # ...and nothing was sent to the watcher through the player sender.
+        assert watcher_id not in player_sends, player_sends
+
+        await bot.dispatch_dm(_dm_message("!end"), reply)
+        await bot.drain()
+
+        assert any("has ended" in text for _, text in watcher_sends), watcher_sends
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_watcher_sender_falls_back_to_the_player_sender() -> None:
+    """The CLI simulator has no radio to distinguish the two and injects
+    only set_send_dm, which must keep working."""
+    watcher_id = "112233445566"
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House"})
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    sends: list[tuple[str, str]] = []
+
+    async def send_dm(pubkey_prefix: str, text: str) -> None:
+        sends.append((pubkey_prefix, text))
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(game=game)
+        bot.set_send_dm(send_dm)  # and deliberately no set_send_watcher_dm
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        sends.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await bot.drain()
+
+        assert [pubkey for pubkey, _ in sends if pubkey == watcher_id], sends

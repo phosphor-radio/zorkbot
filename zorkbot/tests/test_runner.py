@@ -263,16 +263,29 @@ async def test_flush_gives_up_after_cap():
 # ----------------------------------------------------------------------
 
 
-def _make_gate_runner(spacing: float = 0.0, guard: float = 0.0, max_depth: int = 64):
+def _make_gate_runner(
+    spacing: float = 0.0,
+    guard: float = 0.0,
+    max_depth: int = 64,
+    dm_ack: bool = True,
+    contact: dict | None = None,
+):
     """A runner whose config carries real numbers, for exercising the gate."""
     mc = MagicMock()
     mc.commands.send_msg = AsyncMock(return_value="ok")
+    mc.commands.send_msg_with_retry = AsyncMock(return_value="ok")
     mc.commands.send_chan_msg = AsyncMock(return_value="ok")
     mc.commands.send_advert = AsyncMock(return_value="ok")
+    mc.get_contact_by_key_prefix = MagicMock(return_value=contact)
     bot = MagicMock()
     bot.config.send_spacing_seconds = spacing
     bot.config.channel_rx_guard_seconds = guard
     bot.config.max_send_queue_depth = max_depth
+    bot.config.dm_ack_enabled = dm_ack
+    bot.config.dm_ack_max_attempts = 3
+    bot.config.dm_ack_max_flood_attempts = 2
+    bot.config.dm_ack_flood_after = 2
+    bot.config.dm_ack_timeout_seconds = 0.0
     bot.event_sink.message_tx = MagicMock()
     return MeshCoreRunner(bot, mc), mc
 
@@ -289,7 +302,7 @@ async def test_spacing_is_shared_across_dm_and_channel() -> None:
         stamps.append(loop.time())
         return "ok"
 
-    mc.commands.send_msg = AsyncMock(side_effect=stamp)
+    mc.commands.send_msg_with_retry = AsyncMock(side_effect=stamp)
     mc.commands.send_chan_msg = AsyncMock(side_effect=stamp)
 
     await asyncio.gather(
@@ -321,7 +334,7 @@ async def test_adverts_wait_their_turn_on_the_send_gate() -> None:
         stamps.append(("advert", loop.time()))
         return "ok"
 
-    mc.commands.send_msg = AsyncMock(side_effect=msg)
+    mc.commands.send_msg_with_retry = AsyncMock(side_effect=msg)
     mc.commands.send_advert = AsyncMock(side_effect=advert)
 
     advertiser = Advertiser(enabled=True, cooldown_seconds=0)
@@ -407,7 +420,7 @@ async def test_overflow_drop_does_not_leak_the_send_coroutine() -> None:
         result = await runner._send_dm(PUBKEY_PREFIX, "dropped")
         gc.collect()
 
-    assert result is None
+    assert result is False
     assert not [w for w in caught if "never awaited" in str(w.message)], [
         str(w.message) for w in caught
     ]
@@ -472,3 +485,197 @@ async def test_a_channel_message_arriving_mid_wait_re_arms_the_guard() -> None:
     # Without the re-check this returns at ~0.2; the second message pushes
     # the deadline out to ~0.35.
     assert waited >= 0.34, waited
+
+
+# ----------------------------------------------------------------------
+# DM delivery ACKs: player DMs are ACK-waited and retried, watcher
+# fan-out is not (docs/specs/dm-ack-retry.md)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_player_dm_waits_for_the_ack() -> None:
+    """send_msg alone only reports that the radio accepted the frame."""
+    runner, mc = _make_gate_runner()
+
+    delivered = await runner._send_dm(PUBKEY_PREFIX, "you are in a maze")
+
+    assert delivered is True
+    mc.commands.send_msg_with_retry.assert_awaited_once()
+    mc.commands.send_msg.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retry_wait_is_floored_at_the_send_spacing() -> None:
+    """The ACK wait is the gap in front of the next retransmission, so a
+    retry cannot outpace the spacing every other packet obeys."""
+    runner, mc = _make_gate_runner(spacing=2.0)
+
+    await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    kwargs = mc.commands.send_msg_with_retry.await_args.kwargs
+    assert kwargs["min_timeout"] == 2.0
+    assert kwargs["max_attempts"] == 3
+    assert kwargs["max_flood_attempts"] == 2
+    assert kwargs["flood_after"] == 2
+
+
+@pytest.mark.asyncio
+async def test_dm_destination_prefers_the_known_contact() -> None:
+    """A 12-char prefix cannot express a path, so the library would assume
+    flood and never re-route. The contact carries the full key."""
+    contact = {"public_key": "aa" * 32, "out_path_len": 2}
+    runner, mc = _make_gate_runner(contact=contact)
+
+    await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    assert mc.commands.send_msg_with_retry.await_args.args[0] is contact
+
+
+@pytest.mark.asyncio
+async def test_dm_destination_falls_back_to_the_prefix() -> None:
+    """An unknown contact must not fail the send - it just means today's
+    conservative assume-flood behaviour."""
+    runner, mc = _make_gate_runner(contact=None)
+
+    await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    assert mc.commands.send_msg_with_retry.await_args.args[0] == PUBKEY_PREFIX
+
+
+@pytest.mark.asyncio
+async def test_acknowledged_dm_is_recorded_as_delivered() -> None:
+    runner, _ = _make_gate_runner()
+
+    await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    assert runner.bot.event_sink.message_tx.call_args.kwargs["acked"] is True
+
+
+@pytest.mark.asyncio
+async def test_unacknowledged_dm_is_reported_and_recorded(caplog) -> None:
+    """send_msg_with_retry returns None when no ACK ever arrived."""
+    runner, mc = _make_gate_runner()
+    mc.commands.send_msg_with_retry = AsyncMock(return_value=None)
+
+    with caplog.at_level("WARNING"):
+        delivered = await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    assert delivered is False
+    assert runner.bot.event_sink.message_tx.call_args.kwargs["acked"] is False
+    assert "not acknowledged" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_overflow_drop_is_not_recorded_as_a_delivery_failure() -> None:
+    """A packet dropped before it reached the air was never transmitted,
+    which is a different fact from transmitted-and-not-acknowledged."""
+    runner, _ = _make_gate_runner(max_depth=0)
+
+    await runner._send_dm(PUBKEY_PREFIX, "dropped")
+
+    kwargs = runner.bot.event_sink.message_tx.call_args.kwargs
+    assert kwargs["dropped"] is True
+    assert kwargs.get("acked") is None
+
+
+@pytest.mark.asyncio
+async def test_dm_ack_disabled_restores_the_plain_send() -> None:
+    runner, mc = _make_gate_runner(dm_ack=False)
+
+    delivered = await runner._send_dm(PUBKEY_PREFIX, "hello")
+
+    assert delivered is True
+    mc.commands.send_msg.assert_awaited_once()
+    mc.commands.send_msg_with_retry.assert_not_awaited()
+    assert runner.bot.event_sink.message_tx.call_args.kwargs["acked"] is None
+
+
+@pytest.mark.asyncio
+async def test_watcher_dm_is_never_ack_waited() -> None:
+    """Watcher output is a courtesy stream about someone else's game, and
+    fan-out is where ACK-waiting would cost the most airtime."""
+    runner, mc = _make_gate_runner()
+
+    await runner._send_watcher_dm(PUBKEY_PREFIX, "[Alice] > north")
+
+    mc.commands.send_msg.assert_awaited_once()
+    mc.commands.send_msg_with_retry.assert_not_awaited()
+    assert runner.bot.event_sink.message_tx.call_args.kwargs["acked"] is None
+
+
+@pytest.mark.asyncio
+async def test_watcher_dm_still_goes_through_the_send_gate() -> None:
+    """Not ACK-waited is not the same as not spaced."""
+    runner, mc = _make_gate_runner(spacing=0.05)
+    loop = asyncio.get_running_loop()
+    stamps: list[float] = []
+
+    async def stamp(*args, **kwargs):
+        stamps.append(loop.time())
+        return "ok"
+
+    mc.commands.send_msg = AsyncMock(side_effect=stamp)
+
+    await asyncio.gather(
+        runner._send_watcher_dm(PUBKEY_PREFIX, "one"),
+        runner._send_watcher_dm(PUBKEY_PREFIX, "two"),
+    )
+
+    assert stamps[1] - stamps[0] >= 0.05, stamps
+
+
+@pytest.mark.asyncio
+async def test_a_slow_retry_does_not_let_the_next_packet_interleave() -> None:
+    """The lock is held across the ACK wait on purpose: the radio is
+    half-duplex, so transmitting into the ACK window is transmitting on top
+    of the ACK the bot is waiting to hear."""
+    runner, mc = _make_gate_runner(spacing=0.0)
+    events: list[str] = []
+
+    async def slow_retry(*args, **kwargs):
+        events.append("start")
+        await asyncio.sleep(0.1)
+        events.append("end")
+        return "ok"
+
+    mc.commands.send_msg_with_retry = AsyncMock(side_effect=slow_retry)
+
+    await asyncio.gather(
+        runner._send_dm(PUBKEY_PREFIX, "one"),
+        runner._send_dm(PUBKEY_PREFIX, "two"),
+    )
+
+    assert events == ["start", "end", "start", "end"], events
+
+
+@pytest.mark.asyncio
+async def test_channel_sends_and_adverts_record_no_delivery(caplog) -> None:
+    """Neither has a per-recipient ACK to wait for."""
+    runner, _ = _make_gate_runner()
+
+    await runner._send_chan_msg(1, "hello channel")
+    assert runner.bot.event_sink.message_tx.call_args.kwargs["acked"] is None
+
+    runner.bot.event_sink.message_tx.reset_mock()
+    with caplog.at_level("WARNING"):
+        await runner.send_advert(flood=True)
+
+    runner.bot.event_sink.message_tx.assert_not_called()
+    assert "not acknowledged" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_start_injects_both_senders() -> None:
+    """The bot needs to be able to tell player traffic from fan-out."""
+    mc = _make_meshcore()
+    bot = MagicMock()
+    bot.config = BotConfig(channel=ChannelConfig(index=1, name="zork"))
+    bot.set_send_dm = MagicMock()
+    bot.set_send_watcher_dm = MagicMock()
+
+    runner = MeshCoreRunner(bot, mc)
+    await runner.start()
+
+    assert bot.set_send_dm.call_args.args[0] == runner._send_dm_packets
+    assert bot.set_send_watcher_dm.call_args.args[0] == runner._send_watcher_dm
