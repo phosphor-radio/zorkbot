@@ -592,6 +592,259 @@ async def test_game_command_in_dm() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_player_not_blocked_by_watcher_delivery() -> None:
+    """A player's next command must not wait on watcher fan-out.
+
+    The pending-command gate exists to stop a flood, not to make watchers a
+    tax on the player who is being watched: their own reply is the signal
+    that they are free to act again, whether or not anyone is observing.
+    """
+    watcher_id = "112233445566"
+    config = BotConfig()
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    import json as _json
+
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        side_effect=lambda request: httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "output": f"Reply to: {_json.loads(request.content)['text']}",
+            },
+        )
+    )
+
+    player_replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        player_replies.append(text)
+
+    watcher_send_started = asyncio.Event()
+    release_watcher_send = asyncio.Event()
+
+    async def send_dm(pubkey_prefix: str, text: str) -> None:
+        if pubkey_prefix == watcher_id:
+            watcher_send_started.set()
+            await release_watcher_send.wait()
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        bot.set_send_dm(send_dm)
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        player_replies.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await watcher_send_started.wait()  # fan-out to the watcher is now stuck
+
+        # The player already has their own reply — fan-out is a side effect
+        # for a third party, not part of what "north" owes the player.
+        assert player_replies == ["Reply to: north"]
+
+        # A second command sent now must be accepted, not dropped.
+        await bot.dispatch_dm(_dm_message("south"), reply)
+
+        release_watcher_send.set()
+        await bot.drain()
+
+    assert player_replies == ["Reply to: north", "Reply to: south"], (
+        "the player's second command was dropped while watcher fan-out for "
+        "the first was still in flight"
+    )
+
+
+async def _spin_until(predicate, what: str, spins: int = 2000) -> None:
+    """Let the event loop run until predicate() holds.
+
+    Used to pin down an exact concurrency state — e.g. "one command's
+    watcher fan-out is mid-flight and the next one's is queued behind it" —
+    rather than hoping scheduling produced it.
+    """
+    for _ in range(spins):
+        if predicate():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_watcher_fanout_is_not_interleaved_across_commands() -> None:
+    """Freeing the player must not garble what the watcher reads.
+
+    Two commands' fan-out can now be in flight at once, and every packet is
+    a separate acquisition of the runner's FIFO send lock — so independent
+    fan-out tasks would alternate, splicing half of one room description
+    into the next. Fan-out is ordered per session for exactly this reason.
+    """
+    watcher_id = "112233445566"
+    # Small packets so each reply needs several, which is what makes
+    # interleaving visible at all.
+    config = BotConfig(packet_max_chars=40)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    import json as _json
+
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        side_effect=lambda request: httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "output": (
+                    f"You went {_json.loads(request.content)['text']} into a room "
+                    "whose description will not fit in a single mesh packet."
+                ),
+            },
+        )
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    watcher_texts: list[str] = []
+    fanout_started = asyncio.Event()
+    release_first_packet = asyncio.Event()
+
+    async def send_dm(pubkey_prefix: str, text: str) -> None:
+        if not fanout_started.is_set():
+            # Hold the very first packet so the next command's fan-out is
+            # guaranteed to pile up behind this one.
+            fanout_started.set()
+            await release_first_packet.wait()
+        else:
+            await asyncio.sleep(0)
+        watcher_texts.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        bot.set_send_dm(send_dm)
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        watcher_texts.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await fanout_started.wait()
+
+        # The player is free to act while that fan-out is stuck — that is
+        # the whole point — so the second command's fan-out overlaps it.
+        await bot.dispatch_dm(_dm_message("south"), reply)
+        await _spin_until(
+            lambda: bot._fanout_queues.get(1) is not None
+            and bot._fanout_queues[1].qsize() >= 1,
+            "south's fan-out to queue up behind north's",
+        )
+
+        release_first_packet.set()
+        await bot.drain()
+
+    # Group on the echo line that opens each relay. Interleaving shows up
+    # as a group that is short, or whose (n/6) sequence has holes in it.
+    groups: list[list[str]] = []
+    for text in watcher_texts:
+        if text.startswith("[Alice] > "):
+            groups.append([])
+        assert groups, f"watcher packet arrived before any echo line: {watcher_texts}"
+        groups[-1].append(text)
+
+    assert len(groups) == 2, f"Got: {watcher_texts}"
+    assert groups[0][0].startswith("[Alice] > north"), f"Got: {watcher_texts}"
+    assert groups[1][0].startswith("[Alice] > south"), f"Got: {watcher_texts}"
+    for group in groups:
+        assert len(group) == 6, (
+            f"watcher packets from two commands were interleaved: {watcher_texts}"
+        )
+        assert all(
+            f"({n}/6)" in packet for n, packet in enumerate(group, start=1)
+        ), f"watcher packets arrived out of order: {watcher_texts}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_end_notice_does_not_overtake_pending_fanout() -> None:
+    """A watcher must never be told a session ended and then sent more of it.
+
+    Ending removes the session but not the watcher set on the record the
+    in-flight fan-out closed over, so the last command's output is still on
+    its way out when !end is handled — the notice has to queue behind it.
+    """
+    watcher_id = "112233445566"
+    config = BotConfig(packet_max_chars=40)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "output": (
+                    "You are in a long room whose description will not fit "
+                    "inside a single mesh packet."
+                ),
+            },
+        )
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    watcher_texts: list[str] = []
+    fanout_started = asyncio.Event()
+    release_first_packet = asyncio.Event()
+
+    async def send_dm(pubkey_prefix: str, text: str) -> None:
+        if not fanout_started.is_set():
+            fanout_started.set()
+            await release_first_packet.wait()
+        else:
+            await asyncio.sleep(0)
+        watcher_texts.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        bot.set_send_dm(send_dm)
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        watcher_texts.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await fanout_started.wait()
+
+        await bot.dispatch_dm(_dm_message("!end"), reply)
+        await _spin_until(
+            lambda: bot._fanout_queues.get(1) is not None
+            and bot._fanout_queues[1].qsize() >= 1,
+            "the end notice to queue up behind the pending fan-out",
+        )
+
+        release_first_packet.set()
+        await bot.drain()
+
+    ended = "Zork I Session #1 (Alice) has ended. You are no longer watching."
+    assert ended in watcher_texts, f"Got: {watcher_texts}"
+    assert watcher_texts[-1] == ended, (
+        "the watcher was sent game output after being told the session "
+        f"ended: {watcher_texts}"
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_watcher_sees_echo_title_and_description_as_separate_lines() -> None:
     """A watcher's relay includes a "[Name] > command" echo line ahead of
     the game's own output — this must not defeat title/line-break detection
@@ -754,6 +1007,9 @@ async def test_reconcile_sessions_notifies_watchers_of_server_side_timeout() -> 
     bot._state.add_watcher(watcher_id, 1)
 
     await bot._reconcile_sessions()
+    # The poller queues the notice on the session's fan-out queue rather
+    # than awaiting delivery inline.
+    await bot.drain()
 
     game.list_sessions.assert_awaited_once()
     bot._send_dm.assert_awaited_once_with(

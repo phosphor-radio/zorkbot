@@ -449,6 +449,26 @@ players asking at once draw one reply for the channel. It must stay above the
 5–10s collision-avoidance delay in `handle_bots`, or a second roll call is
 admitted while the first reply is still waiting to transmit.
 
+**"Response" means the player's own reply — not fan-out to anyone watching
+them.** A watched player's room description also goes out to up to
+`max_watchers_per_session` observers, and that can take several times longer
+to transmit than the player's own reply. Watcher delivery is queued rather
+than counted as part of the command being "in flight," specifically so that
+being watched never changes how quickly a player can act — the guarantee
+above holds identically whether they have zero watchers or the maximum. The
+same applies to the watcher notification sent when a session ends: it does
+not hold up the player's (or an admin's) next command either.
+
+Because the player is now free to send their next command while the previous
+one is still reaching watchers, **fan-out is queued per session with a single
+consumer**, not spawned as an independent task per command. Every packet is a
+separate acquisition of the send gate, so two overlapping fan-outs would
+interleave — a watcher would read half of one room description, then part of
+the next, then the rest of the first — and the end-of-session notice could
+arrive before output it is meant to follow. One queue per session keeps a
+watcher's view in the order things actually happened, at no cost to the
+player's responsiveness.
+
 ## Admin access
 
 Admin commands are authenticated by **`pubkey_prefix`** — a cryptographic identifier derived from the node's private key that cannot be spoofed. Set `[admin].pubkeys` in `zorkbot.toml` to your 12-char hex pubkey prefix.

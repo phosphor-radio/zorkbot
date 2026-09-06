@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from typing import Callable
@@ -74,7 +75,14 @@ class ZorkBot:
         self._workers: dict[str, asyncio.Task] = {}
         # Fire-and-forget tasks (e.g. delayed !bots reply) not tied to a
         # player's command queue, tracked so stop() can cancel them cleanly.
+        # Some of these never return (the session poller), so nothing may
+        # wait on this set as a whole — see drain().
         self._background_tasks: set[asyncio.Task] = set()
+        # Per-session watcher fan-out: session_num -> queue of coroutines,
+        # each with a single consumer task, so a session's watchers see its
+        # output in order without the sender's worker waiting on delivery.
+        self._fanout_queues: dict[int, asyncio.Queue] = {}
+        self._fanout_workers: dict[int, asyncio.Task] = {}
 
         self._started_at = time.monotonic()
 
@@ -145,7 +153,13 @@ class ZorkBot:
                 record.num, record.player_id[:8], len(record.watchers),
             )
             if self._send_dm:
-                await notify_watchers_session_ended(self._send_dm, record)
+                # Queued, not awaited: it must land behind any fan-out still
+                # pending for this session, and polling must not stall on a
+                # watcher's radio.
+                self._fanout(
+                    record.num,
+                    notify_watchers_session_ended(self._send_dm, record),
+                )
 
     async def dispatch_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
         """Handle a message from the #zork channel."""
@@ -327,6 +341,71 @@ class ZorkBot:
         if not task.cancelled() and (exc := task.exception()) is not None:
             logger.error("background task failed", exc_info=exc)
 
+    def _fanout(self, session_num: int, coro) -> None:
+        """Queue coro as watcher fan-out for one session, off the sender's
+        command queue but strictly in order behind that session's earlier
+        fan-out.
+
+        Two properties are needed at once, and neither alone is enough:
+
+        - Awaiting fan-out inline would keep the sending player's worker
+          "busy", and _enqueue's pending-command gate drops their next
+          message for as long as that worker runs — making every watcher a
+          tax on how fast the player being watched can act.
+        - Spawning each fan-out as an independent task would let two of them
+          overlap, and since every packet is a separate acquisition of the
+          runner's FIFO send lock, they would interleave: a watcher reading
+          half of one room description, then part of the next, then the rest
+          of the first. The end-of-session notice could likewise overtake
+          the output it is meant to follow.
+
+        So: one queue and one consumer per session. The caller returns
+        immediately; the session's watchers see everything in the order it
+        happened.
+        """
+        queue = self._fanout_queues.get(session_num)
+        if queue is None:
+            queue = self._fanout_queues[session_num] = asyncio.Queue()
+        queue.put_nowait(coro)
+
+        worker = self._fanout_workers.get(session_num)
+        if worker is None or worker.done():
+            self._fanout_workers[session_num] = asyncio.create_task(
+                self._run_fanout(session_num),
+                name=f"zorkbot-fanout-{session_num}",
+            )
+            self._fanout_workers[session_num].add_done_callback(
+                functools.partial(self._on_fanout_done, session_num)
+            )
+
+    async def _run_fanout(self, session_num: int) -> None:
+        queue = self._fanout_queues.get(session_num)
+        if queue is None:
+            return
+        # No await between the emptiness check and the task finishing, so a
+        # _fanout racing this exit either lands before the check (loop
+        # continues) or after the task is done (a fresh worker is started).
+        while not queue.empty():
+            coro = await queue.get()
+            try:
+                await coro
+            except Exception:
+                logger.exception("watcher fan-out failed session=%d", session_num)
+            finally:
+                queue.task_done()
+
+    def _on_fanout_done(self, session_num: int, task: asyncio.Task) -> None:
+        # Sessions are never renumbered, so a finished session's queue is
+        # dead weight — but only drop it if this is still the live worker
+        # and nothing arrived behind it.
+        if self._fanout_workers.get(session_num) is not task:
+            return
+        queue = self._fanout_queues.get(session_num)
+        if queue is not None and not queue.empty():
+            return
+        self._fanout_workers.pop(session_num, None)
+        self._fanout_queues.pop(session_num, None)
+
     async def _run_worker(self, player_id: str) -> None:
         queue = self._queues.get(player_id)
         if queue is None:
@@ -390,7 +469,9 @@ class ZorkBot:
             return
 
         if command == "end":
-            await handle_end(ctx, self.game, self._state, rest_args, send_dm)
+            await handle_end(
+                ctx, self.game, self._state, rest_args, send_dm, self._fanout
+            )
             return
 
         if command == "list":
@@ -411,7 +492,7 @@ class ZorkBot:
 
         if command == "_game":
             await handle_game_command(
-                ctx, self.game, self._state, rest_args, send_dm
+                ctx, self.game, self._state, rest_args, send_dm, self._fanout
             )
             return
 
@@ -421,6 +502,12 @@ class ZorkBot:
 
     async def drain(self) -> None:
         for q in self._queues.values():
+            await q.join()
+        # Watcher fan-out outlives the command that queued it, so draining
+        # commands alone would leave those sends in flight. The per-session
+        # queues can be joined; _background_tasks cannot (the session poller
+        # never returns).
+        for q in list(self._fanout_queues.values()):
             await q.join()
 
     async def stop(self) -> None:
@@ -432,8 +519,21 @@ class ZorkBot:
             task.cancel()
         for task in self._background_tasks:
             task.cancel()
+        for task in self._fanout_workers.values():
+            task.cancel()
         await asyncio.gather(
-            *self._workers.values(), *self._background_tasks, return_exceptions=True
+            *self._workers.values(),
+            *self._background_tasks,
+            *self._fanout_workers.values(),
+            return_exceptions=True,
         )
         self._workers.clear()
         self._background_tasks.clear()
+        self._fanout_workers.clear()
+        # Close fan-out that never got its turn, so it doesn't resurface as
+        # a "coroutine was never awaited" warning at interpreter exit.
+        for queue in self._fanout_queues.values():
+            while not queue.empty():
+                queue.get_nowait().close()
+                queue.task_done()
+        self._fanout_queues.clear()
