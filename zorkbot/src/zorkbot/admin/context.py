@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from zorkbot.admin.auth import AuthService
     from zorkbot.admin.bus import SessionBus
     from zorkbot.admin.events import SqliteEventSink
+    from zorkbot.admin.logbus import LogBus
     from zorkbot.admin.store import Store
     from zorkbot.bot import ZorkBot
     from zorkbot.config import AdminUIConfig
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 class AdminContext:
     store: "Store"
     bus: "SessionBus"
+    logbus: "LogBus"
     auth: "AuthService"
     sink: "SqliteEventSink"
     bot: "ZorkBot"

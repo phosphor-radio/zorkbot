@@ -437,6 +437,7 @@ already applies.
 |--------|------|------|---------|
 | `GET` | `/api/status` | admin | Bot uptime, version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count, count of offline-backlog messages discarded at startup |
 | `GET` | `/health` | none | Liveness only — `{"status":"ok"}`, no data |
+| `GET` | `/api/logs/stream` | admin | SSE tail of the process log, `level=DEBUG\|INFO\|WARNING\|ERROR\|CRITICAL` |
 
 `startup_flushed_messages` reports how many queued-while-offline messages `MeshCoreRunner.start()`
 discarded when the bot came up (see the offline-backlog section in
@@ -486,11 +487,60 @@ Concurrent streams are capped at `max_live_streams` (default 4); further request
 
 ---
 
+## Log tail
+
+`GET /api/logs/stream?level=INFO` is a second `text/event-stream`, fed by `LogBus` — a
+`logging.Handler` installed on the root logger. Every record the process emits lands in a bounded
+ring of `log_buffer_lines` (default 500), replayed on connect so the view opens on recent history
+rather than a blank pane. Nothing is persisted: the log is the operator's live window on the
+process, and SQLite holds the event history. The two are deliberately separate — a log tail written
+to the same SQLite file on a Pi's SD card would be a write-amplification problem in exchange for
+data the operator's own `docker compose logs` already keeps.
+
+```
+event: hello
+data: {"root_level":"INFO","buffer_size":500,"replayed":42}
+
+event: log
+data: {"seq":1043,"at":1756...,"level":"WARNING","levelno":30,"logger":"zorkbot.bot","message":"dm to aabb… not acknowledged after 2 attempts"}
+```
+
+`hello` carries `root_level` because the view can only ever filter what the process already logs: a
+bot running at `log_level = "WARNING"` has no DEBUG records to show whatever the UI dropdown says,
+and without that number an empty pane reads as a broken stream. `level` is filtered server-side
+against a name allowlist (never `logging.getLevelName`, which accepts arbitrary strings and hands
+them back), and applies to both the replay and the live tail.
+
+`seq` is a monotonic per-process record id. A client that reconnects — the server closed, a proxy
+timed the connection out — is replayed the whole ring again, and uses `seq` as a watermark to tell
+lines it already has from lines it missed.
+
+Three properties `LogBus` has to hold:
+
+* **Never raise, never log.** A logging handler that logs on its own error path recurses until the
+  stack runs out; one that raises breaks the caller that was only trying to log a message.
+* **Thread-safe hand-off.** Records arrive from whichever thread logged them — the event loop for
+  most of the bot, but an `asyncio.to_thread` worker for every SQLite call in `store.py`.
+  `asyncio.Queue` is not thread-safe, so delivery is marshalled onto the loop with
+  `call_soon_threadsafe`, which also keeps records in the order they were logged.
+* **Visible loss.** A subscriber that falls behind its 256-slot queue has records dropped rather
+  than blocking the logging call. The count is reported on the next record that gets through
+  (`dropped_before`) and rendered as an explicit gap marker: a silently incomplete log tail is worse
+  than one that admits what it lost.
+
+Concurrent streams are capped at `max_log_streams` (default 2); further requests get `429`. The SPA
+drops its stream as soon as the Logs tab loses focus, so a cap that low is not felt in normal use.
+
+**Auth on SSE** works exactly as it does for the transcript stream: bearer header on a `fetch()`
+-read body, never a token in the query string.
+
+---
+
 ## Frontend
 
 Single-page vanilla JavaScript, no build step, served by the same app from
 `zorkbot/src/zorkbot/admin/static/`. This matches the project's existing tooling profile — there is
-no JS toolchain in the repo today and adding one to render five views is not a good trade.
+no JS toolchain in the repo today and adding one to render six views is not a good trade.
 
 Charts use a small hand-rolled inline-SVG line renderer (~80 lines in `app.js`) rather than a
 vendored charting library: three time-series views don't justify a dependency, hand-rolled avoids
@@ -500,6 +550,14 @@ series, zoom/pan, tooltips) — at that point vendoring something like uPlot (MI
 the better trade; the CSP already forbids remote script sources either way, so it would still need
 to be vendored, not CDN-loaded.
 
+The CSP is `style-src 'self'` with no `'unsafe-inline'`, which blocks `style=""` attributes as well
+as `<style>` blocks. Anything that varies visually per element — series colours above all — has to
+come from a class in `app.css`, not from a style the renderer writes. This is easy to get wrong
+because it fails silently: the attribute is simply dropped and the element renders unstyled, with
+nothing in the console pointing at the cause. Series colours are therefore declared once as
+`--series-color` on `.chart .series-a` … `.series-d`, and read by both the SVG stroke and the legend
+swatch.
+
 Views:
 
 | View | Contents |
@@ -508,6 +566,7 @@ Views:
 | **History** | Session start/end table with date-range and player filters, cursor pagination. |
 | **Charts** | Session starts/ends; messages received (dm / channel / both); messages sent (dm / channel / both). Shared range picker (1 h / 24 h / 7 d / 30 d / custom) driving `bucket` automatically. |
 | **Players** | Sortable stats table; row opens the per-player detail. |
+| **Logs** | Live tail of the process log. Server-side level filter (reconnects), client-side substring filter, follow-tail toggle that releases when you scroll up, and clear. |
 | **Settings** | Change password. Shown modally and exclusively on first login. |
 
 Token handling in the browser: the access token is held in a JS variable (memory only); the refresh
@@ -537,6 +596,8 @@ New `[admin_ui]` section in `zorkbot.toml`. `config.py` gains `_ADMIN_UI_KEYS` a
 # event_queue_size = 1024
 # live_buffer_events = 50
 # max_live_streams = 4
+# log_buffer_lines = 500                # process log records kept for the Logs view
+# max_log_streams = 2
 ```
 
 | Key | Default | Description |

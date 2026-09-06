@@ -14,6 +14,10 @@ const state = {
   playersSort: "last_active",
   playersOrder: "desc",
   historyCursor: null,
+  logStreamAbort: null,
+  logReconnect: null,
+  logRecords: [],
+  logLastSeq: 0,
 };
 
 function setTokens(resp) {
@@ -68,6 +72,20 @@ async function tryRefresh() {
     clearTokens();
     return false;
   }
+}
+
+// Streams are opened with `apiRaw` so the caller keeps the ReadableStream —
+// `api`'s retry would consume the body. They still need the same one-shot
+// refresh, and more than most requests: a log tail is meant to stay open for
+// hours, well past the access token's 30-minute TTL, and without this its
+// reconnect loop would spin on 401 until someone reloaded the page.
+async function openStream(path, signal) {
+  let resp = await apiRaw(path, { signal });
+  if (resp.status === 401 && state.refreshToken) {
+    if (await tryRefresh()) resp = await apiRaw(path, { signal });
+  }
+  if (resp.status === 401) showLogin();
+  return resp;
 }
 
 // ---------------------------------------------------------------------
@@ -206,6 +224,8 @@ document.getElementById("settings-password-form").addEventListener("submit", asy
 
 document.getElementById("logout-btn").addEventListener("click", async () => {
   stopLive();
+  stopLogStream();
+  resetLogView();
   if (state.refreshToken) {
     try {
       const body = new URLSearchParams();
@@ -235,6 +255,11 @@ for (const btn of document.querySelectorAll(".tab")) {
     if (btn.dataset.tab === "history") loadHistory(true);
     if (btn.dataset.tab === "charts") loadCharts();
     if (btn.dataset.tab === "players") loadPlayers();
+    // Log streams are capped server-side (max_log_streams, default 2), so the
+    // stream is dropped the moment the tab loses focus rather than held open
+    // for a view nobody is looking at.
+    if (btn.dataset.tab === "logs") startLogStream();
+    else stopLogStream();
   });
 }
 document.querySelector(".tab[data-tab='live']").classList.add("active");
@@ -334,25 +359,12 @@ async function openLiveStream(num) {
   state.liveStreamAbort = controller;
 
   try {
-    const resp = await apiRaw(`/sessions/${num}/stream`, { signal: controller.signal });
+    const resp = await openStream(`/sessions/${num}/stream`, controller.signal);
     if (!resp.ok || !resp.body) {
       log.textContent = "Could not open stream.";
       return;
     }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const rawEvent = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        handleSseEvent(rawEvent, log, num);
-      }
-    }
+    await readSse(resp, (event, data) => handleSessionEvent(event, data, log, num));
   } catch (e) {
     if (e.name !== "AbortError") {
       log.textContent += "\n[stream closed]";
@@ -360,21 +372,44 @@ async function openLiveStream(num) {
   }
 }
 
-function handleSseEvent(raw, log, num) {
+// EventSource can't send an Authorization header and a token must never go in
+// a query string, so the SPA reads the text/event-stream body itself. Shared
+// by the session transcript and the log tail.
+async function readSse(resp, onEvent) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const parsed = parseSseFrame(frame);
+      if (parsed) onEvent(parsed.event, parsed.data);
+    }
+  }
+}
+
+function parseSseFrame(raw) {
   let event = "message";
   let dataLine = "";
   for (const line of raw.split("\n")) {
     if (line.startsWith("event:")) event = line.slice(6).trim();
     else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
-    else if (line.startsWith(":")) return; // comment/ping
+    else if (line.startsWith(":")) return null; // comment/ping
   }
-  if (!dataLine) return;
-  let data;
+  if (!dataLine) return null;
   try {
-    data = JSON.parse(dataLine);
+    return { event, data: JSON.parse(dataLine) };
   } catch (e) {
-    return;
+    return null;
   }
+}
+
+function handleSessionEvent(event, data, log, num) {
   if (event === "command") {
     appendLog(log, `[${data.player}] > ${data.text}`);
   } else if (event === "output") {
@@ -468,8 +503,16 @@ function bucketForRange(rangeSeconds) {
   return "day";
 }
 
-function renderLineChart(container, series, labels) {
-  // series: [{name, color, points: [{t, v}]}]
+// Series colours live in app.css (.chart .series-*), not here: the admin CSP
+// forbids inline styles, so a style="" swatch would render colourless.
+const SERIES_CLASSES = ["series-a", "series-b", "series-c", "series-d"];
+
+function seriesClass(i) {
+  return SERIES_CLASSES[i % SERIES_CLASSES.length];
+}
+
+function renderLineChart(container, series) {
+  // series: [{name, points: [{t, v}]}]
   const width = 900;
   const height = 160;
   const padding = { top: 10, right: 10, bottom: 20, left: 32 };
@@ -488,14 +531,13 @@ function renderLineChart(container, series, labels) {
   svg += `<text class="axis-label" x="2" y="${padding.top + 8}">${maxV}</text>`;
 
   series.forEach((s, i) => {
-    const cls = i === 0 ? "series-a" : "series-b";
     const d = s.points.map((p, idx) => `${idx === 0 ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-    svg += `<path class="${cls}" d="${d}" />`;
+    svg += `<path class="${seriesClass(i)}" d="${d}" />`;
   });
   svg += `</svg>`;
 
   const legend = series
-    .map((s, i) => `<span><span class="dot" style="background:${i === 0 ? "var(--accent)" : "var(--danger)"}"></span>${escapeHtml(s.name)}</span>`)
+    .map((s, i) => `<span><span class="dot ${seriesClass(i)}"></span>${escapeHtml(s.name)}</span>`)
     .join("");
 
   container.innerHTML = `<div class="legend">${legend}</div>${svg}`;
@@ -549,6 +591,200 @@ document.getElementById("chart-range").addEventListener("change", loadCharts);
 for (const input of document.querySelectorAll("input[name='rx-transport'], input[name='tx-transport']")) {
   input.addEventListener("change", loadCharts);
 }
+
+// ---------------------------------------------------------------------
+// Log tail. A live view on the running process, streamed from the same
+// in-memory ring the server replays on connect — no history, no persistence.
+// ---------------------------------------------------------------------
+
+// Independent of the server's ring: a tab left open for a day would otherwise
+// accumulate unboundedly in the DOM.
+const LOG_MAX_LINES = 2000;
+
+const logLinesEl = document.getElementById("log-lines");
+const logStreamEl = document.getElementById("log-stream");
+const logStatusEl = document.getElementById("log-status");
+const logFilterEl = document.getElementById("log-filter");
+const logLevelEl = document.getElementById("log-level");
+const logFollowEl = document.getElementById("log-follow");
+
+function logStatus(text) {
+  logStatusEl.textContent = text;
+}
+
+function stopLogStream() {
+  if (state.logReconnect) {
+    clearTimeout(state.logReconnect);
+    state.logReconnect = null;
+  }
+  if (state.logStreamAbort) {
+    state.logStreamAbort.abort();
+    state.logStreamAbort = null;
+  }
+}
+
+function logsTabActive() {
+  return !document.getElementById("tab-logs").hidden;
+}
+
+async function startLogStream() {
+  stopLogStream();
+  if (logLinesEl.childElementCount === 0) renderLogLines();
+  const controller = new AbortController();
+  state.logStreamAbort = controller;
+  const level = logLevelEl.value;
+  logStatus("connecting\u2026");
+
+  try {
+    const resp = await openStream(`/logs/stream?level=${encodeURIComponent(level)}`, controller.signal);
+    if (resp.status === 401) {
+      logStatus("signed out");
+      return;
+    }
+    if (resp.status === 429) {
+      logStatus("too many log streams open \u2014 close another tab");
+      return;
+    }
+    if (!resp.ok || !resp.body) {
+      logStatus("could not open stream");
+      return;
+    }
+    await readSse(resp, handleLogEvent);
+    logStatus("stream closed");
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    logStatus("stream closed");
+  }
+  // The server closes on shutdown and any proxy in front may time the
+  // connection out; a log tail that silently stops is worse than useless.
+  if (state.logStreamAbort === controller && logsTabActive()) {
+    state.logReconnect = setTimeout(startLogStream, 2000);
+  }
+}
+
+function handleLogEvent(event, data) {
+  if (event === "hello") {
+    logStatus(`streaming \u00b7 process level ${data.root_level}`);
+    return;
+  }
+  if (event !== "log") return;
+  // A reconnect replays the server's whole ring buffer; the watermark keeps
+  // the lines we already have from being appended a second time.
+  if (data.seq <= state.logLastSeq) return;
+  state.logLastSeq = data.seq;
+  clearLogPlaceholder();
+  if (data.dropped_before) appendLogGap(data.dropped_before);
+  state.logRecords.push(data);
+  if (state.logRecords.length > LOG_MAX_LINES) state.logRecords.shift();
+  if (logMatchesFilter(data)) appendLogLine(data);
+  trimLogLines();
+  followLogTail();
+}
+
+function logMatchesFilter(record) {
+  const needle = logFilterEl.value.trim().toLowerCase();
+  if (!needle) return true;
+  return (
+    record.message.toLowerCase().includes(needle) ||
+    record.logger.toLowerCase().includes(needle)
+  );
+}
+
+// Records carry arbitrary text from anywhere in the process, so every field
+// goes in via textContent — never innerHTML.
+function appendLogLine(record) {
+  const row = document.createElement("div");
+  row.className = `log-line level-${String(record.level).toLowerCase()}`;
+
+  const at = document.createElement("span");
+  at.className = "log-at";
+  at.textContent = new Date(record.at * 1000).toLocaleTimeString();
+
+  const level = document.createElement("span");
+  level.className = "log-level";
+  level.textContent = record.level;
+
+  const logger = document.createElement("span");
+  logger.className = "log-logger";
+  logger.textContent = record.logger;
+
+  const message = document.createElement("span");
+  message.className = "log-message";
+  message.textContent = record.message;
+
+  row.append(at, level, logger, message);
+  logLinesEl.appendChild(row);
+}
+
+function appendLogGap(count) {
+  const gap = document.createElement("div");
+  gap.className = "log-gap";
+  gap.textContent = `[${count} line${count === 1 ? "" : "s"} dropped \u2014 stream fell behind]`;
+  logLinesEl.appendChild(gap);
+}
+
+function clearLogPlaceholder() {
+  const placeholder = logLinesEl.querySelector(".log-empty");
+  if (placeholder) placeholder.remove();
+}
+
+function trimLogLines() {
+  while (logLinesEl.childElementCount > LOG_MAX_LINES) {
+    logLinesEl.removeChild(logLinesEl.firstElementChild);
+  }
+}
+
+function followLogTail() {
+  if (logFollowEl.checked) logStreamEl.scrollTop = logStreamEl.scrollHeight;
+}
+
+function renderLogLines() {
+  logLinesEl.replaceChildren();
+  const matching = state.logRecords.filter(logMatchesFilter);
+  if (matching.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = state.logRecords.length ? "No lines match the filter." : "No log lines yet.";
+    logLinesEl.appendChild(empty);
+    return;
+  }
+  for (const record of matching) appendLogLine(record);
+  followLogTail();
+}
+
+logFilterEl.addEventListener("input", renderLogLines);
+
+// Level is a server-side filter, so changing it means a new stream — and a
+// fresh backlog replay at the new level, which is what the operator wants.
+logLevelEl.addEventListener("change", () => {
+  state.logRecords = [];
+  state.logLastSeq = 0;
+  renderLogLines();
+  startLogStream();
+});
+
+document.getElementById("log-clear").addEventListener("click", () => {
+  // Clear hides what you have already read; the watermark stays put so the
+  // stream keeps delivering only new lines.
+  state.logRecords = [];
+  renderLogLines();
+});
+
+// Signing out must not leave the previous session's log tail on screen.
+function resetLogView() {
+  state.logRecords = [];
+  state.logLastSeq = 0;
+  renderLogLines();
+}
+
+// Scrolling up is how you say "let me read this" — stop yanking the view back.
+logStreamEl.addEventListener("scroll", () => {
+  const atBottom =
+    logStreamEl.scrollHeight - logStreamEl.scrollTop - logStreamEl.clientHeight < 24;
+  if (!atBottom && logFollowEl.checked) logFollowEl.checked = false;
+});
+
+logFollowEl.addEventListener("change", followLogTail);
 
 // ---------------------------------------------------------------------
 // Players

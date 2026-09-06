@@ -1,5 +1,6 @@
 """Tests for config loading."""
 
+import logging
 from pathlib import Path
 
 from zorkbot.config import BotConfig, load_config
@@ -194,3 +195,31 @@ def test_dm_ack_abandon_response_can_be_disabled(tmp_path: Path) -> None:
     config = load_config(config_path)
     assert config.dm_ack_abandon_response is False
     assert BotConfig().dm_ack_abandon_response is True
+
+
+def test_admin_ui_log_tail_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text(
+        """
+[admin_ui]
+enabled = true
+log_buffer_lines = 100
+max_log_streams = 1
+""".strip()
+    )
+    config = load_config(config_path)
+    assert config.admin_ui.log_buffer_lines == 100
+    assert config.admin_ui.max_log_streams == 1
+
+
+def test_admin_ui_log_tail_defaults() -> None:
+    assert BotConfig().admin_ui.log_buffer_lines == 500
+    assert BotConfig().admin_ui.max_log_streams == 2
+
+
+def test_admin_ui_log_keys_are_not_flagged_as_unknown(tmp_path: Path, caplog) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("[admin_ui]\nlog_buffer_lines = 100\nmax_log_streams = 1\n")
+    with caplog.at_level(logging.WARNING):
+        load_config(config_path)
+    assert "unknown key" not in caplog.text
