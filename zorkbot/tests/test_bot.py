@@ -1313,3 +1313,257 @@ def test_help_text_uses_the_shortened_command_descriptions() -> None:
     first = channel_help_packets()[0]
     assert "!start - begin/resume game" in first
     assert "!watch <N> - observe session" in first
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_watcher_fanout_uses_the_fire_and_forget_sender() -> None:
+    """Player DMs are ACK-waited; watcher fan-out is not. The bot is what
+    decides which of the two a given DM is."""
+    watcher_id = "112233445566"
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House"})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    player_sends: list[str] = []
+    watcher_sends: list[tuple[str, str]] = []
+
+    async def send_dm(pubkey_prefix: str, text: str) -> bool:
+        player_sends.append(pubkey_prefix)
+        return True
+
+    async def send_watcher_dm(pubkey_prefix: str, text: str) -> None:
+        watcher_sends.append((pubkey_prefix, text))
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(game=game)
+        bot.set_send_dm(send_dm)
+        bot.set_send_watcher_dm(send_watcher_dm)
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        player_sends.clear()
+        watcher_sends.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await bot.drain()
+
+        # Everything the watcher got went out fire-and-forget...
+        assert watcher_sends, "watcher received nothing"
+        assert all(pubkey == watcher_id for pubkey, _ in watcher_sends), watcher_sends
+        # ...and nothing was sent to the watcher through the player sender.
+        assert watcher_id not in player_sends, player_sends
+
+        await bot.dispatch_dm(_dm_message("!end"), reply)
+        await bot.drain()
+
+        assert any("has ended" in text for _, text in watcher_sends), watcher_sends
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_watcher_sender_falls_back_to_the_player_sender() -> None:
+    """The CLI simulator has no radio to distinguish the two and injects
+    only set_send_dm, which must keep working."""
+    watcher_id = "112233445566"
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House"})
+    )
+
+    async def reply(text: str) -> None:
+        pass
+
+    sends: list[tuple[str, str]] = []
+
+    async def send_dm(pubkey_prefix: str, text: str) -> None:
+        sends.append((pubkey_prefix, text))
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(game=game)
+        bot.set_send_dm(send_dm)  # and deliberately no set_send_watcher_dm
+
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        await bot.dispatch_dm(_dm_message("!watch 1", pubkey_prefix=watcher_id), reply)
+        await bot.drain()
+        sends.clear()
+
+        await bot.dispatch_dm(_dm_message("north"), reply)
+        await bot.drain()
+
+        assert [pubkey for pubkey, _ in sends if pubkey == watcher_id], sends
+
+
+# ----------------------------------------------------------------------
+# Abandoning the rest of a response after a delivery failure
+# ----------------------------------------------------------------------
+
+
+def _ctx(reply, config=None):
+    from zorkbot.context import Context
+
+    return Context(
+        message=_dm_message("look"),
+        args="",
+        _reply=reply,
+        config=config or BotConfig(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_reply_many_stops_after_an_undelivered_packet() -> None:
+    """Each remaining packet would cost several more transmissions on a link
+    that just proved it is not carrying traffic."""
+    sent: list[str] = []
+
+    async def reply(text: str) -> bool:
+        sent.append(text)
+        return len(sent) < 2  # the second packet is not acknowledged
+
+    ok = await _ctx(reply).reply_many(["one", "two", "three", "four"])
+
+    assert ok is False
+    assert sent == ["one", "two"]
+
+
+@pytest.mark.asyncio
+async def test_reply_many_treats_none_as_unmeasured() -> None:
+    """A sender that does not measure delivery returns None. Reading that as
+    failure would truncate every multi-packet reply on an unmeasured path -
+    channel traffic, the simulator, every test double."""
+    sent: list[str] = []
+
+    async def reply(text: str) -> None:
+        sent.append(text)
+
+    ok = await _ctx(reply).reply_many(["one", "two", "three"])
+
+    assert ok is True
+    assert sent == ["one", "two", "three"]
+
+
+@pytest.mark.asyncio
+async def test_abandon_can_be_switched_off() -> None:
+    sent: list[str] = []
+
+    async def reply(text: str) -> bool:
+        sent.append(text)
+        return False
+
+    config = BotConfig(dm_ack_abandon_response=False)
+    ok = await _ctx(reply, config).reply_many(["one", "two", "three"])
+
+    assert ok is True
+    assert sent == ["one", "two", "three"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_game_response_is_cut_short_when_a_packet_is_lost() -> None:
+    """End to end: the player's reply stops at the packet that failed."""
+    config = BotConfig(packet_max_chars=40)
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "output": (
+                    "You are standing in an open field west of a white house, "
+                    "with a boarded front door. There is a small mailbox here."
+                ),
+            },
+        )
+    )
+
+    sent: list[str] = []
+
+    async def reply(text: str) -> bool:
+        sent.append(text)
+        return len(sent) < 2
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        sent.clear()
+
+        await bot.dispatch_dm(_dm_message("look"), reply)
+        await bot.drain()
+
+    # The response needed more than two packets; the rest were not sent.
+    assert len(sent) == 2, sent
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_undelivered_intro_skips_the_initial_look() -> None:
+    """The look is several more packets down the link the intro just failed
+    on, and the session is started either way."""
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    look = respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House"})
+    )
+
+    async def reply(text: str) -> bool:
+        return False
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+
+        assert not look.called
+        # The session is live regardless - the player can look themselves.
+        assert bot.session_state.active_state(PLAYER_ID) == "playing"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_undelivered_reset_confirmation_skips_the_initial_look() -> None:
+    """!reset follows the same rule as !start."""
+    respx.post("http://game:8080/sessions").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    respx.delete(f"http://game:8080/sessions/{PLAYER_ID}/save").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    look = respx.post(f"http://game:8080/sessions/{PLAYER_ID}/command").mock(
+        return_value=httpx.Response(200, json={"ok": True, "output": "West of House"})
+    )
+
+    delivered = True
+
+    async def reply(text: str) -> bool:
+        return delivered
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(game=game)
+        await bot.dispatch_dm(_dm_message("!start"), reply)
+        await bot.drain()
+        look.reset()
+
+        delivered = False
+        await bot.dispatch_dm(_dm_message("!reset"), reply)
+        await bot.drain()
+
+        assert not look.called
+        assert bot.session_state.active_state(PLAYER_ID) == "playing"

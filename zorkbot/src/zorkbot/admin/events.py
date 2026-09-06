@@ -36,6 +36,10 @@ class EventSink(Protocol):
         pubkey_prefix: str | None,
         chars: int,
         dropped: bool = False,
+        # True/False once the recipient's delivery ACK has been waited for,
+        # None when it was not: channel messages, watcher fan-out, and
+        # packets dropped before they ever reached the air.
+        acked: bool | None = None,
     ) -> None: ...
 
     def command(
@@ -187,11 +191,22 @@ class SqliteEventSink:
             (int(time.time()), transport, channel_idx, pubkey_prefix, chars),
         )
 
-    def message_tx(self, *, transport, channel_idx, pubkey_prefix, chars, dropped=False) -> None:
+    def message_tx(
+        self, *, transport, channel_idx, pubkey_prefix, chars, dropped=False, acked=None
+    ) -> None:
         self._enqueue(
-            "INSERT INTO messages(at, direction, transport, channel_idx, pubkey_prefix, chars, dropped) "
-            "VALUES (?, 'tx', ?, ?, ?, ?, ?)",
-            (int(time.time()), transport, channel_idx, pubkey_prefix, chars, int(dropped)),
+            "INSERT INTO messages"
+            "(at, direction, transport, channel_idx, pubkey_prefix, chars, dropped, acked) "
+            "VALUES (?, 'tx', ?, ?, ?, ?, ?, ?)",
+            (
+                int(time.time()),
+                transport,
+                channel_idx,
+                pubkey_prefix,
+                chars,
+                int(dropped),
+                None if acked is None else int(acked),
+            ),
         )
 
     def command(

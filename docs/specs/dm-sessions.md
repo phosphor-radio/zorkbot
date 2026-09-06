@@ -297,6 +297,12 @@ All outgoing transmissions (channel messages and DMs) share a single `_send_lock
 configurable (`send_spacing_seconds`, default 2.0 s). Watcher fan-out DMs are naturally
 deprioritized by execution order (player DM sent first).
 
+DMs to players additionally wait for the recipient's delivery ACK and are retransmitted when it
+does not arrive; watcher fan-out deliberately does not, and stays fire-and-forget. The ACK wait is
+floored at `send_spacing_seconds` so retries are paced like every other packet, and it is held
+under the send lock — the radio is half-duplex, so transmitting into the ACK window would talk over
+the ACK. See [dm-ack-retry.md](dm-ack-retry.md).
+
 Worst-case backlog estimate (8 sessions × 3 packets/response × 3 recipients × 2 s) ≈ 144 s. In
 practice, LoRa radio arrival staggering and the inactivity-based session pool keep active session
 counts low. `max_send_queue_depth` (default 64 packets) caps the backlog; excess entries are
@@ -316,6 +322,13 @@ dropped with a warning log.
 | `advert_cooldown_seconds` | 300 | Min time between any two adverts |
 | `send_spacing_seconds` | 2.0 | Minimum gap between RF transmissions |
 | `max_send_queue_depth` | 64 | Max queued packets before overflow drops |
+| `channel_rx_guard_seconds` | 2.0 | Quiet period after a channel message before the bot may transmit; 0 disables |
+| `dm_ack_enabled` | true | Wait for the delivery ACK on player DMs; false restores fire-and-forget |
+| `dm_ack_max_attempts` | 3 | Transmissions per player DM packet, the first included |
+| `dm_ack_max_flood_attempts` | 2 | Lower cap when the contact is flood-routed or unknown |
+| `dm_ack_flood_after` | 2 | Failed direct attempts before the contact's path is reset to flood |
+| `dm_ack_timeout_seconds` | 0.0 | ACK wait per attempt; 0 uses the firmware's suggested timeout |
+| `dm_ack_abandon_response` | true | Stop sending the rest of a response once one of its packets has failed |
 | `bots_enabled` | false | Enable `!bots` roll-call handling; requires `[bots_channel]` too |
 | `[bots_channel] index` / `name` | none | Dedicated channel `!bots` listens on — separate from `[channel]` |
 | `[admin] pubkeys` | [] | Pubkey prefixes (12 hex chars) of admin users |

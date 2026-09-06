@@ -31,6 +31,21 @@ game_url = "http://game:8080"   # Docker Compose; use http://localhost:8080 for 
 #                                   # arrives, before the bot may transmit.
 #                                   # 0 disables it.
 
+# DM delivery ACKs. A DM to a player waits for the recipient's ACK and is
+# retransmitted if it does not arrive; watcher fan-out stays fire-and-forget.
+# The ACK wait is also the gap before the next retransmission, and is floored
+# at send_spacing_seconds so retries are paced like every other packet.
+# dm_ack_enabled = true             # false = fire and forget, as before
+# dm_ack_max_attempts = 3           # transmissions per packet, first included.
+#                                   # 1 measures the delivery rate without
+#                                   # ever retransmitting - start here.
+# dm_ack_max_flood_attempts = 2     # lower cap for a flood-routed contact
+# dm_ack_flood_after = 2            # failed direct tries before the path is
+#                                   # reset to flood
+# dm_ack_timeout_seconds = 0.0      # 0 = use the firmware's suggested timeout
+# dm_ack_abandon_response = true    # stop sending the rest of a response
+#                                   # once one of its packets has failed
+
 # Mesh bot discovery (!bots roll call) — a separate channel from the game
 # lobby below. Disabled by default; requires both of these to be set.
 # bots_enabled = false

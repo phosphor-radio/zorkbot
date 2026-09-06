@@ -42,7 +42,16 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
         "reset player=%s old_session=%s new_session=%d",
         player_id, old_num, new_record.num,
     )
-    await ctx.reply(
+    delivered = await ctx.reply(
         f"Game reset. Zork I Session #{new_record.num} started fresh."
     )
+    # Same rule as !start: the look is several more packets down the link the
+    # confirmation just failed on, and the reset itself has already happened.
+    if not delivered and ctx.config.dm_ack_abandon_response:
+        logger.warning(
+            "session=%d reset confirmation not delivered to player=%s - "
+            "skipping initial look",
+            new_record.num, player_id[:8],
+        )
+        return
     await send_initial_look(ctx, game, player_id)

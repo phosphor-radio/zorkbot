@@ -12,7 +12,7 @@ from zorkbot.session_state import SessionRecord
 
 
 async def notify_watchers_session_ended(
-    send_dm_func,   # async (pubkey_prefix, text) -> None
+    send_watcher_dm_func,   # async (pubkey_prefix, text) -> None
     record: SessionRecord,
 ) -> None:
     if not record.watchers:
@@ -22,4 +22,4 @@ async def notify_watchers_session_ended(
         "You are no longer watching."
     )
     for watcher_id in list(record.watchers):
-        await send_dm_func(watcher_id, text)
+        await send_watcher_dm_func(watcher_id, text)

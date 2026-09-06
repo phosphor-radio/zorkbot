@@ -399,6 +399,14 @@ max_send_queue_depth = 64       # max queued packets before drops
 channel_rx_guard_seconds = 2.0  # quiet period after a channel message
                                 # arrives, before the bot may transmit
 
+# DM delivery ACKs (player DMs only; watcher fan-out stays fire-and-forget)
+dm_ack_enabled = true           # false = fire and forget, as before
+dm_ack_max_attempts = 3         # transmissions per packet, first included
+dm_ack_max_flood_attempts = 2   # lower cap for a flood-routed contact
+dm_ack_flood_after = 2          # failed direct tries before a path reset
+dm_ack_timeout_seconds = 0.0    # 0 = use the firmware's suggested timeout
+dm_ack_abandon_response = true  # stop a response after a failed packet
+
 # Mesh bot discovery (!bots roll call) — a separate channel from the game
 # lobby below. Disabled by default; requires both bots_enabled and
 # [bots_channel] to be set.
@@ -450,6 +458,38 @@ packets and adverts all queue on one lock with one clock, so an advert - a
 flood advert reaches further than any message the bot sends - waits its turn
 behind whatever game traffic is already going out rather than transmitting on
 top of it.
+
+**DMs to players are acknowledged, and retried when they are not.** A radio
+reporting a message as sent means only that it accepted the frame for
+transmission; the recipient acknowledges separately, and MeshCore firmware does
+not retransmit on the client's behalf. Player DMs therefore wait for that ACK
+and are retransmitted up to `dm_ack_max_attempts` times, after which the failure
+is logged and recorded. Retries are transmissions like any other, so the ACK
+wait - which is the gap in front of the next attempt - is floored at
+`send_spacing_seconds`.
+
+The wait holds the send lock: the radio is half-duplex, so transmitting into
+the ACK window is transmitting on top of the ACK the bot is waiting to hear.
+That makes an undelivered packet the slow case, bounded by
+`dm_ack_max_attempts * max(firmware timeout, send_spacing_seconds)`. On a mesh
+you have not measured, set `dm_ack_max_attempts = 1` first: that waits for the
+ACK and records the outcome without ever retransmitting, so the real delivery
+rate is visible before any airtime is spent on retries.
+
+**A response stops at the packet that failed.** Once a packet has exhausted
+its attempts, the rest of that response would each cost several more
+transmissions on a link that has just proved it is not carrying traffic, so
+they are not sent (`dm_ack_abandon_response`, default on). The session is
+untouched and the player's next command works normally once they are back in
+range. `!start` follows the same rule: an intro that does not arrive is not
+chased with the opening room description.
+
+**Watcher fan-out is deliberately not acknowledged.** A lost watcher packet
+costs a fragment of someone else's game; a lost player packet costs that player
+their turn. Fan-out is also where ACK-waiting would cost most - watchers x
+packets, each one holding the send gate through its own ACK window, in airtime
+taken from every player - which is the same tax the ordered fan-out queue
+exists to keep off the player being watched.
 
 **`channel_rx_guard_seconds` covers the packet spacing cannot.**
 `send_spacing_seconds` measures the gap since the bot's *own* previous

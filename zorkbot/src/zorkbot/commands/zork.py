@@ -77,28 +77,40 @@ async def send_initial_look(
     ctx: Context,
     game: GameClient,
     player_id: str,
-    send_dm_func=None,   # async (pubkey_prefix, text) -> None, required if not ctx.is_dm
-) -> None:
+    send_dm_func=None,   # async (pubkey_prefix, text) -> bool, required if not ctx.is_dm
+) -> bool:
     """Silently issue a `look` after !start/!reset and forward the room
-    description to the player's DM, so they immediately see where they are."""
+    description to the player's DM, so they immediately see where they are.
+
+    False when the look was cut short by a delivery failure."""
     try:
         result = await game.command(player_id, "look")
     except (GameServiceError, SessionNotFoundError):
         logger.warning("initial look failed player=%s", player_id)
-        return
+        return True
 
     if not result.ok:
-        return
+        return True
 
     packets = packetize(result.output, max_chars=ctx.config.packet_max_chars)
     if not packets:
-        return
+        return True
 
     if ctx.is_dm:
-        await ctx.reply_many(packets)
-    else:
-        for packet in packets:
-            await send_dm_func(player_id, packet)
+        return await ctx.reply_many(packets)
+
+    for packet in packets:
+        # Only an explicit False is a measured delivery failure; see
+        # Context.reply_many for why None must not count as one.
+        if await send_dm_func(player_id, packet) is False and (
+            ctx.config.dm_ack_abandon_response
+        ):
+            logger.warning(
+                "initial look cut short player=%s - packet not delivered",
+                player_id[:8],
+            )
+            return False
+    return True
 
 
 async def handle_game_command(
@@ -106,10 +118,14 @@ async def handle_game_command(
     game: GameClient,
     state: SessionState,
     command_text: str,
-    send_dm_func,   # async (pubkey_prefix, text) -> None
+    send_watcher_dm_func,   # async (pubkey_prefix, text) -> None
     fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
-    """Process a bare game command from a DM session."""
+    """Process a bare game command from a DM session.
+
+    The player's own reply goes out through ctx.reply_many; the sender passed
+    here is only ever used for watcher fan-out, which is why it is the
+    fire-and-forget one."""
     player_id = ctx.pubkey_prefix
     if not player_id:
         await ctx.reply("Cannot identify you - please send an Advert.")
@@ -182,7 +198,7 @@ async def handle_game_command(
         async def _notify_watchers() -> None:
             for watcher_id in list(record.watchers):
                 for packet in watcher_packets:
-                    await send_dm_func(watcher_id, packet)
+                    await send_watcher_dm_func(watcher_id, packet)
 
             logger.debug(
                 "game fan-out session=%d watchers=%d packets=%d",

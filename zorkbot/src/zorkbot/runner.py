@@ -201,8 +201,10 @@ class MeshCoreRunner:
             self._on_dm_msg,
         )
 
-        # Give the bot a reference to send DMs.
+        # Give the bot a reference to send DMs. Two of them: player DMs wait
+        # for the recipient's ACK, watcher fan-out does not.
         self.bot.set_send_dm(self._send_dm_packets)
+        self.bot.set_send_watcher_dm(self._send_watcher_dm)
         self.bot.set_send_queue_depth_getter(lambda: self._send_queue_depth)
         self.bot.start_session_poller()
 
@@ -300,8 +302,11 @@ class MeshCoreRunner:
         self._record_rx(message)
         self._note_channel_rx()
 
-        async def reply(text: str) -> None:
+        async def reply(text: str) -> bool:
+            # A channel message is a broadcast with no per-recipient ACK, so
+            # delivery is never measured and a reply is never abandoned.
             await self._send_chan_msg(message.channel_idx, text)
+            return True
 
         await self.bot.dispatch_channel(message, reply)
 
@@ -316,8 +321,9 @@ class MeshCoreRunner:
         self._record_rx(message)
         self._note_channel_rx()
 
-        async def reply(text: str) -> None:
+        async def reply(text: str) -> bool:
             await self._send_chan_msg(message.channel_idx, text)
+            return True
 
         await self.bot.dispatch_bots_channel(message, reply)
 
@@ -365,9 +371,13 @@ class MeshCoreRunner:
         )
         self._record_rx(message)
 
-        async def reply(reply_text: str) -> None:
-            if pubkey_prefix:
-                await self._send_dm(pubkey_prefix, reply_text)
+        async def reply(reply_text: str) -> bool:
+            if not pubkey_prefix:
+                # Nothing to send to, so nothing was measured. True, not
+                # False: False means a measured delivery failure and would
+                # truncate the rest of the response.
+                return True
+            return await self._send_dm(pubkey_prefix, reply_text)
 
         await self.bot.dispatch_dm(message, reply)
 
@@ -375,11 +385,72 @@ class MeshCoreRunner:
     # Send helpers — all go through the unified lock
     # ------------------------------------------------------------------
 
-    async def _send_dm_packets(self, pubkey_prefix: str, text: str) -> None:
-        """Called by bot.py to send a DM. Goes through the unified send gate."""
-        await self._send_dm(pubkey_prefix, text)
+    async def _send_dm_packets(self, pubkey_prefix: str, text: str) -> bool:
+        """Called by bot.py to send a player DM. Goes through the unified
+        send gate. True when the recipient acknowledged it."""
+        return await self._send_dm(pubkey_prefix, text)
 
-    async def _send_dm(self, pubkey_prefix: str, text: str) -> None:
+    def _dm_destination(self, pubkey_prefix: str) -> Any:
+        """The full contact if the radio knows one, else the bare prefix.
+
+        The contact carries the 32-byte public key and out_path_len, which is
+        what lets the library tell a direct path from a flood one and reset
+        the path after repeated failures. A 12-char prefix cannot express
+        either, so passing one silently means "assume flood, never re-route".
+        Falling back to it when the contact is unknown reproduces that
+        conservative behaviour rather than failing the send.
+        """
+        contact = self.meshcore.get_contact_by_key_prefix(pubkey_prefix)
+        return contact if contact else pubkey_prefix
+
+    async def _send_dm(self, pubkey_prefix: str, text: str) -> bool:
+        """Send one DM to a player and wait for its delivery ACK.
+
+        Returns False for both a delivery failure and a local queue-overflow
+        drop — from the caller's point of view the packet did not arrive
+        either way. The two are distinguished in the stats, not here.
+        """
+        config = self.bot.config
+        if not config.dm_ack_enabled:
+            result = await self._send_with_spacing(
+                self.meshcore.commands.send_msg(pubkey_prefix, text),
+                transport="dm",
+                pubkey_prefix=pubkey_prefix,
+                chars=len(text),
+            )
+            return result is not None
+
+        result = await self._send_with_spacing(
+            self.meshcore.commands.send_msg_with_retry(
+                self._dm_destination(pubkey_prefix),
+                text,
+                max_attempts=config.dm_ack_max_attempts,
+                max_flood_attempts=config.dm_ack_max_flood_attempts,
+                flood_after=config.dm_ack_flood_after,
+                timeout=config.dm_ack_timeout_seconds,
+                # Every attempt after the first is another transmission, and
+                # the ACK wait is the gap in front of it — so flooring that
+                # wait at send_spacing_seconds is what keeps retries subject
+                # to the same spacing as every other packet the bot sends.
+                min_timeout=config.send_spacing_seconds,
+            ),
+            transport="dm",
+            pubkey_prefix=pubkey_prefix,
+            chars=len(text),
+            ack_aware=True,
+        )
+        return result is not None
+
+    async def _send_watcher_dm(self, pubkey_prefix: str, text: str) -> None:
+        """Send one watcher fan-out DM, fire and forget.
+
+        Deliberately not ACK-waited and not retried (docs/specs/dm-ack-retry.md).
+        Watcher output is a courtesy stream about someone else's game, and
+        fan-out is where ACK-waiting would cost most: watchers x packets, each
+        one holding the send gate through its own ACK window, in airtime taken
+        from every player. That is the tax the decoupled fan-out queue exists
+        to keep off the player being watched.
+        """
         await self._send_with_spacing(
             self.meshcore.commands.send_msg(pubkey_prefix, text),
             transport="dm",
@@ -455,6 +526,7 @@ class MeshCoreRunner:
         pubkey_prefix: str | None = None,
         chars: int = 0,
         record: bool = True,
+        ack_aware: bool = False,
     ) -> Any:
         max_depth = self.bot.config.max_send_queue_depth
         if self._send_queue_depth >= max_depth:
@@ -466,6 +538,8 @@ class MeshCoreRunner:
             # right when the log is being read for the overflow itself.
             coro.close()
             if record:
+                # acked stays None: the packet was never transmitted, which is
+                # a different fact from "transmitted and not acknowledged".
                 self.bot.event_sink.message_tx(
                     transport=transport,
                     channel_idx=channel_idx,
@@ -481,12 +555,26 @@ class MeshCoreRunner:
                 await self._wait_for_quiet_air()
                 try:
                     result = await coro
+                    # None only means "not delivered" for a send that waited
+                    # for an ACK; everything else returns None routinely.
+                    acked = (result is not None) if ack_aware else None
+                    if acked is False:
+                        # "up to": a flood-routed contact is capped at
+                        # dm_ack_max_flood_attempts, and the library does not
+                        # report how many attempts it actually made.
+                        logger.warning(
+                            "DM not acknowledged player=%s chars=%d after up to %d attempt(s)",
+                            (pubkey_prefix or "?")[:8],
+                            chars,
+                            self.bot.config.dm_ack_max_attempts,
+                        )
                     if record:
                         self.bot.event_sink.message_tx(
                             transport=transport,
                             channel_idx=channel_idx,
                             pubkey_prefix=pubkey_prefix,
                             chars=chars,
+                            acked=acked,
                         )
                     return result
                 finally:

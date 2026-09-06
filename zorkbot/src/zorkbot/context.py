@@ -12,7 +12,11 @@ from typing import Any
 
 from zorkbot.config import BotConfig
 
-ReplyFunc = Callable[[str], Awaitable[None]]
+# Returns whether the packet reached its recipient. False only ever means a
+# measured, failed delivery: a sender that does not measure (channel traffic,
+# the CLI simulator, a test double) returns True or None, and None is treated
+# as "unknown", never as failure — see Context.reply_many.
+ReplyFunc = Callable[[str], Awaitable[bool | None]]
 
 
 @dataclass(frozen=True)
@@ -52,9 +56,23 @@ class Context:
             and self.pubkey_prefix.lower() in self.config.admin_pubkeys
         )
 
-    async def reply(self, text: str) -> None:
-        await self._reply(text)
+    async def reply(self, text: str) -> bool:
+        return await self._reply(text) is not False
 
-    async def reply_many(self, texts: Iterable[str]) -> None:
+    async def reply_many(self, texts: Iterable[str]) -> bool:
+        """Send each packet in turn, stopping if one is not delivered.
+
+        A packet that failed every retry says the link is not carrying
+        traffic right now, and each remaining packet would cost several more
+        transmissions to prove it again. Returns False if the response was cut
+        short.
+
+        Only an explicit False counts as a failure. A sender that returns None
+        has not measured delivery rather than observed it fail, and treating
+        that as a failure would truncate every multi-packet reply the moment
+        it went through an unmeasured path.
+        """
         for text in texts:
-            await self._reply(text)
+            if await self._reply(text) is False and self.config.dm_ack_abandon_response:
+                return False
+        return True

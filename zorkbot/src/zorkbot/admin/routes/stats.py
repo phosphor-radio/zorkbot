@@ -124,6 +124,43 @@ async def stats_messages(
     return [{"t": t, **counts} for t, counts in sorted(buckets.items())]
 
 
+@router.get("/stats/delivery")
+async def stats_delivery(
+    request: Request,
+    from_: int | None = Query(None, alias="from"),
+    to: int | None = Query(None),
+    bucket: str = Query("hour"),
+    _entry: dict = Depends(require_scope()),
+) -> list[dict]:
+    """DM delivery outcomes over time.
+
+    Only rows whose delivery was actually measured are counted — `acked IS
+    NOT NULL`. Channel messages have no per-recipient ACK, watcher fan-out
+    deliberately does not wait for one, and a packet dropped on overflow
+    never reached the air; none of those are delivery failures, and none of
+    them belong in this ratio. What is left is player DMs, so the series
+    reads as "how reliably players are being reached".
+    """
+    ctx = get_ctx(request)
+    from_, to, bucket_seconds = _range(from_, to, bucket)
+    buckets = _zero_fill(from_, to, bucket_seconds, ("delivered", "failed"))
+
+    rows = await ctx.store.query(
+        "SELECT at, acked FROM messages "
+        "WHERE direction = 'tx' AND acked IS NOT NULL AND at BETWEEN ? AND ?",
+        (from_, to),
+    )
+    for row in rows:
+        t = row["at"] - (row["at"] % bucket_seconds)
+        b = buckets.setdefault(t, {"delivered": 0, "failed": 0})
+        if row["acked"]:
+            b["delivered"] += 1
+        else:
+            b["failed"] += 1
+
+    return [{"t": t, **counts} for t, counts in sorted(buckets.items())]
+
+
 @router.get("/stats/commands")
 async def stats_commands(
     request: Request,

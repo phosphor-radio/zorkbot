@@ -33,6 +33,12 @@ _ROOT_OPTIONAL_KEYS = frozenset({
     "send_spacing_seconds",
     "max_send_queue_depth",
     "channel_rx_guard_seconds",
+    "dm_ack_enabled",
+    "dm_ack_max_attempts",
+    "dm_ack_max_flood_attempts",
+    "dm_ack_flood_after",
+    "dm_ack_timeout_seconds",
+    "dm_ack_abandon_response",
     "bots_enabled",
     "session_poll_seconds",
 })
@@ -94,6 +100,32 @@ class BotConfig:
     # own previous transmission, and the first packet has none. DMs are
     # addressed rather than flooded, so they are not guarded.
     channel_rx_guard_seconds: float = 2.0
+
+    # DM delivery ACKs. A DM to a player waits for the recipient's ACK and is
+    # retransmitted a bounded number of times when it does not arrive. Watcher
+    # fan-out deliberately stays fire-and-forget — see
+    # docs/specs/dm-ack-retry.md for why the two are not treated alike.
+    dm_ack_enabled: bool = True
+    # Transmissions per packet, counting the first. 1 waits for the ACK and
+    # records the outcome without ever retransmitting, which is the cheapest
+    # way to measure a mesh's real delivery rate before paying for retries.
+    dm_ack_max_attempts: int = 3
+    # Lower cap applied instead when the contact is flood-routed, or unknown
+    # to the radio: a flood retry is repeated by the whole mesh.
+    dm_ack_max_flood_attempts: int = 2
+    # Failed direct attempts before the contact's path is reset to flood.
+    # Every later DM to that player then floods until a path is re-learned,
+    # so this is deliberately not 1 — a player briefly out of range should
+    # not cost the mesh a re-route.
+    dm_ack_flood_after: int = 2
+    # ACK wait per attempt; 0 uses the firmware's suggested_timeout. Whatever
+    # it resolves to is floored at send_spacing_seconds, since that wait is
+    # also the gap before the next retransmission.
+    dm_ack_timeout_seconds: float = 0.0
+    # Stop sending the rest of a multi-packet response once one of its packets
+    # has failed every attempt. Each remaining packet would cost several more
+    # transmissions on a link that has just proved it is not carrying traffic.
+    dm_ack_abandon_response: bool = True
 
     # Mesh bot discovery (!bots roll call) — a separate channel from the
     # game lobby, disabled by default, and only active once both a
@@ -177,6 +209,24 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
     channel_rx_guard_seconds = _root_value(data, channel, admin, "channel_rx_guard_seconds")
     if channel_rx_guard_seconds is not None:
         config.channel_rx_guard_seconds = float(channel_rx_guard_seconds)
+    dm_ack_enabled = _root_value(data, channel, admin, "dm_ack_enabled")
+    if dm_ack_enabled is not None:
+        config.dm_ack_enabled = bool(dm_ack_enabled)
+    dm_ack_max_attempts = _root_value(data, channel, admin, "dm_ack_max_attempts")
+    if dm_ack_max_attempts is not None:
+        config.dm_ack_max_attempts = int(dm_ack_max_attempts)
+    dm_ack_max_flood_attempts = _root_value(data, channel, admin, "dm_ack_max_flood_attempts")
+    if dm_ack_max_flood_attempts is not None:
+        config.dm_ack_max_flood_attempts = int(dm_ack_max_flood_attempts)
+    dm_ack_flood_after = _root_value(data, channel, admin, "dm_ack_flood_after")
+    if dm_ack_flood_after is not None:
+        config.dm_ack_flood_after = int(dm_ack_flood_after)
+    dm_ack_timeout_seconds = _root_value(data, channel, admin, "dm_ack_timeout_seconds")
+    if dm_ack_timeout_seconds is not None:
+        config.dm_ack_timeout_seconds = float(dm_ack_timeout_seconds)
+    dm_ack_abandon_response = _root_value(data, channel, admin, "dm_ack_abandon_response")
+    if dm_ack_abandon_response is not None:
+        config.dm_ack_abandon_response = bool(dm_ack_abandon_response)
     bots_enabled = _root_value(data, channel, admin, "bots_enabled")
     if bots_enabled is None:
         bots_enabled = bots_channel.get("bots_enabled")

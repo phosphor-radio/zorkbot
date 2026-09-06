@@ -88,6 +88,11 @@ class ZorkBot:
 
         # Injected by the runner after construction.
         self._send_dm: ReplyFunc | None = None
+        # Watcher fan-out goes out fire-and-forget while player DMs wait for
+        # an ACK, so the runner injects a second sender. Left None by an
+        # embedder that has no radio to distinguish (the CLI simulator), in
+        # which case _watcher_sender falls back to the player one.
+        self._send_watcher_dm: ReplyFunc | None = None
         self._send_queue_depth_getter: Callable[[], int | None] = lambda: None
         # How many queued-while-offline messages the runner discarded at
         # startup. Stays None when nothing drained a radio (simulate mode),
@@ -112,6 +117,13 @@ class ZorkBot:
 
     def set_send_dm(self, func: ReplyFunc) -> None:
         self._send_dm = func
+
+    def set_send_watcher_dm(self, func: ReplyFunc) -> None:
+        self._send_watcher_dm = func
+
+    @property
+    def _watcher_sender(self) -> ReplyFunc | None:
+        return self._send_watcher_dm or self._send_dm
 
     def set_send_queue_depth_getter(self, func: Callable[[], int | None]) -> None:
         self._send_queue_depth_getter = func
@@ -152,13 +164,14 @@ class ZorkBot:
                 "session=%d player=%s ended server-side — notifying %d watcher(s)",
                 record.num, record.player_id[:8], len(record.watchers),
             )
-            if self._send_dm:
+            watcher_sender = self._watcher_sender
+            if watcher_sender:
                 # Queued, not awaited: it must land behind any fan-out still
                 # pending for this session, and polling must not stall on a
                 # watcher's radio.
                 self._fanout(
                     record.num,
-                    notify_watchers_session_ended(self._send_dm, record),
+                    notify_watchers_session_ended(watcher_sender, record),
                 )
 
     async def dispatch_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
@@ -430,9 +443,15 @@ class ZorkBot:
             accepted=True,
         )
 
-        async def send_dm(pubkey_prefix: str, text: str) -> None:
-            if self._send_dm:
-                await self._send_dm(pubkey_prefix, text)
+        async def send_dm(pubkey_prefix: str, text: str) -> bool:
+            if not self._send_dm:
+                return True
+            return await self._send_dm(pubkey_prefix, text) is not False
+
+        async def send_watcher_dm(pubkey_prefix: str, text: str) -> None:
+            sender = self._watcher_sender
+            if sender:
+                await sender(pubkey_prefix, text)
 
         async def send_advert() -> None:
             await self.advertiser.send_if_due(self.meshcore)
@@ -474,7 +493,7 @@ class ZorkBot:
 
         if command == "end":
             await handle_end(
-                ctx, self.game, self._state, rest_args, send_dm, self._fanout
+                ctx, self.game, self._state, rest_args, send_watcher_dm, self._fanout
             )
             return
 
@@ -496,7 +515,7 @@ class ZorkBot:
 
         if command == "_game":
             await handle_game_command(
-                ctx, self.game, self._state, rest_args, send_dm, self._fanout
+                ctx, self.game, self._state, rest_args, send_watcher_dm, self._fanout
             )
             return
 

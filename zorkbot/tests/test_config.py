@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from zorkbot.config import load_config
+from zorkbot.config import BotConfig, load_config
 
 
 def test_load_config_from_toml(tmp_path: Path) -> None:
@@ -153,3 +153,44 @@ index = 3
     config = load_config(config_path)
     assert config.bots_enabled is False
     assert config.bots_channel.index == 3
+
+
+def test_dm_ack_defaults() -> None:
+    config = BotConfig()
+    assert config.dm_ack_enabled is True
+    assert config.dm_ack_max_attempts == 3
+    assert config.dm_ack_max_flood_attempts == 2
+    assert config.dm_ack_flood_after == 2
+    assert config.dm_ack_timeout_seconds == 0.0
+
+
+def test_dm_ack_config_from_toml(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text(
+        """
+dm_ack_max_attempts = 1
+dm_ack_max_flood_attempts = 1
+dm_ack_flood_after = 3
+dm_ack_timeout_seconds = 6.5
+""".strip()
+    )
+    config = load_config(config_path)
+    assert config.dm_ack_max_attempts == 1
+    assert config.dm_ack_max_flood_attempts == 1
+    assert config.dm_ack_flood_after == 3
+    assert config.dm_ack_timeout_seconds == 6.5
+
+
+def test_dm_ack_can_be_disabled(tmp_path: Path) -> None:
+    """false has to mean "off", not "unset"."""
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("dm_ack_enabled = false\n")
+    assert load_config(config_path).dm_ack_enabled is False
+
+
+def test_dm_ack_abandon_response_can_be_disabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text("dm_ack_abandon_response = false\n")
+    config = load_config(config_path)
+    assert config.dm_ack_abandon_response is False
+    assert BotConfig().dm_ack_abandon_response is True
