@@ -26,18 +26,21 @@ _HELP_PACKETS = [
 ]
 HELP_TEXT = "\n".join(_HELP_PACKETS)
 
-# DM !help (no active session) — includes !reset since it applies here.
-_HELP_PACKETS_DM = [
-    _HELP_PACKET_1,
-    "!watchers — list all observers\n!reset — wipe save & restart",
-]
+# DM !help, packet 2. Ends with a pointer back to the game channel, since a DM
+# session gives no other hint that #zork (or whatever it's configured as)
+# exists — parametrized on channel_name rather than hardcoded, so it stays
+# correct if [channel].name is changed. !rules only applies to a player with
+# an active session, so it's folded in for that case rather than shown always.
+def _dm_help_packet_2(channel_name: str, *, in_session: bool) -> str:
+    lines = ["!watchers — list all observers", "!reset — wipe save & restart"]
+    if in_session:
+        lines.append("!rules — basic rules")
+    lines.append(f"Join {channel_name} and send !help for more info.")
+    return "\n".join(lines)
 
-# Shown instead of _HELP_PACKETS_DM for !help from a DM with an active
-# (non-watching) session, so a playing player also sees !rules. Folded into
-# the last packet (kept short) rather than its own, to stay under 120 chars.
-_HELP_PACKETS_IN_SESSION = _HELP_PACKETS_DM[:-1] + [
-    _HELP_PACKETS_DM[-1] + "\n!rules — basic rules",
-]
+
+def dm_help_packets(channel_name: str, *, in_session: bool) -> list[str]:
+    return [_HELP_PACKET_1, _dm_help_packet_2(channel_name, in_session=in_session)]
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
 Discord: @phosphor_radio

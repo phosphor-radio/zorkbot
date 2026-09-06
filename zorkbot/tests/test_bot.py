@@ -194,14 +194,25 @@ def test_help_text_mentions_uptime() -> None:
 
 
 def test_dm_help_omits_author_and_uptime() -> None:
-    from zorkbot.commands.zork import _HELP_PACKETS_DM, _HELP_PACKETS_IN_SESSION
+    from zorkbot.commands.zork import dm_help_packets
 
-    dm_text = "\n".join(_HELP_PACKETS_DM)
-    in_session_text = "\n".join(_HELP_PACKETS_IN_SESSION)
+    dm_text = "\n".join(dm_help_packets("#zork", in_session=False))
+    in_session_text = "\n".join(dm_help_packets("#zork", in_session=True))
     assert "!author" not in dm_text
     assert "!uptime" not in dm_text
     assert "!author" not in in_session_text
     assert "!uptime" not in in_session_text
+
+
+def test_dm_help_packets_point_back_to_the_configured_channel() -> None:
+    """The join hint must track [channel].name, not a hardcoded "#zork" —
+    the exact bug class this codebase keeps finding in hand-authored text."""
+    from zorkbot.commands.zork import dm_help_packets
+
+    for in_session in (False, True):
+        text = "\n".join(dm_help_packets("#some-other-channel", in_session=in_session))
+        assert "Join #some-other-channel and send !help for more info." in text
+        assert "#zork" not in text
 
 
 def _bots_enabled_config(bots_index: int = 2) -> BotConfig:
@@ -345,6 +356,28 @@ async def test_help_via_dm_without_session_omits_rules() -> None:
         await bot.drain()
 
     assert not any("!rules" in r for r in replies), f"Got: {replies}"
+
+
+@pytest.mark.asyncio
+async def test_help_via_dm_mentions_the_game_channel() -> None:
+    """A DM session gives no other hint that the game channel exists, so
+    !help's second packet points back to it — using whatever [channel].name
+    is actually configured, not a literal "#zork"."""
+    config = BotConfig()
+    config.channel = ChannelConfig(index=1, name="#some-other-channel")
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        await bot.dispatch_dm(_dm_message("!help"), reply)
+        await bot.drain()
+
+    assert any(
+        "Join #some-other-channel and send !help for more info." in r for r in replies
+    ), f"Got: {replies}"
 
 
 @pytest.mark.asyncio
