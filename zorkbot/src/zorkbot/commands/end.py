@@ -23,7 +23,7 @@ async def handle_end(
     state: SessionState,
     args: str,
     send_dm_func,   # async (pubkey_prefix, text) -> None
-    spawn_func,     # (coroutine) -> None — fire-and-forget background task
+    fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
     player_id = ctx.pubkey_prefix
     if not player_id:
@@ -32,7 +32,9 @@ async def handle_end(
 
     # Admin force-end: !end <N>
     if args.strip():
-        await _handle_admin_end(ctx, game, state, args.strip(), send_dm_func, spawn_func)
+        await _handle_admin_end(
+            ctx, game, state, args.strip(), send_dm_func, fanout_func
+        )
         return
 
     active = state.active_state(player_id)
@@ -52,11 +54,14 @@ async def handle_end(
             logger.warning("end_session failed for player=%s: %s", player_id, exc)
         logger.info("session=%s ended by player=%s", num, player_id)
         await ctx.reply(f"Zork I Session #{num} saved and ended.")
-        # Backgrounded — the player already has their end confirmation, and
-        # watcher notification must not keep their worker "busy" and their
-        # next command (e.g. an immediate !start) blocked behind it.
+        # Queued, not awaited — the player already has their end
+        # confirmation, and watcher notification must not keep their worker
+        # "busy" and their next command (e.g. an immediate !start) blocked
+        # behind it. Going through the session's fan-out queue keeps the
+        # notice behind any of that session's output still being delivered,
+        # so no watcher is told the session ended and then sent more of it.
         if record is not None:
-            spawn_func(notify_watchers_session_ended(send_dm_func, record))
+            fanout_func(record.num, notify_watchers_session_ended(send_dm_func, record))
         return
 
     await ctx.reply("You don't have an active session or watch to end.")
@@ -68,7 +73,7 @@ async def _handle_admin_end(
     state: SessionState,
     arg: str,
     send_dm_func,   # async (pubkey_prefix, text) -> None
-    spawn_func,     # (coroutine) -> None — fire-and-forget background task
+    fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
     if not ctx.is_admin():
         await ctx.reply("You are not authorized for that command.")
@@ -96,7 +101,7 @@ async def _handle_admin_end(
         "session=%d force-ended by admin=%s", session_num, ctx.pubkey_prefix
     )
     await ctx.reply(f"Zork I Session #{session_num} ({record.player_name}) has been ended.")
-    # Backgrounded — see the equivalent note in handle_end. Here it is the
-    # admin's own worker that would otherwise be held busy notifying a third
-    # party's watchers about someone else's session.
-    spawn_func(notify_watchers_session_ended(send_dm_func, record))
+    # Queued, not awaited — see the equivalent note in handle_end. Here it is
+    # the admin's own worker that would otherwise be held busy notifying a
+    # third party's watchers about someone else's session.
+    fanout_func(session_num, notify_watchers_session_ended(send_dm_func, record))

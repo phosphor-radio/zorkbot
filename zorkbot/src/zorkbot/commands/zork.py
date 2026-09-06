@@ -81,7 +81,7 @@ async def handle_game_command(
     state: SessionState,
     command_text: str,
     send_dm_func,   # async (pubkey_prefix, text) -> None
-    spawn_func,     # (coroutine) -> None — fire-and-forget background task
+    fanout_func,    # (session_num, coroutine) -> None — ordered watcher fan-out
 ) -> None:
     """Process a bare game command from a DM session."""
     player_id = ctx.pubkey_prefix
@@ -138,12 +138,14 @@ async def handle_game_command(
     # Send to the player.
     await ctx.reply_many(packets)
 
-    # Fan-out to watchers, in the background. The player already has their
-    # reply by this point; watcher delivery is a side effect for a third
-    # party and must not hold the player's own worker "busy" — bot.py's
-    # pending-command gate drops a player's next message for as long as
-    # their worker is running, so awaiting fan-out here would make every
-    # watcher an unwitting tax on how fast the player being watched can act.
+    # Hand fan-out to the session's fan-out queue rather than awaiting it.
+    # The player already has their reply; watcher delivery is a side effect
+    # for a third party and must not hold the player's own worker "busy" —
+    # bot.py's pending-command gate drops a player's next message for as
+    # long as their worker is running, so awaiting fan-out here would make
+    # every watcher an unwitting tax on how fast the player being watched
+    # can act. The queue keeps this session's fan-out in command order even
+    # though the player is now free to send the next one immediately.
     if record.watchers:
         watcher_packets = packetize(
             output,
@@ -161,4 +163,4 @@ async def handle_game_command(
                 record.num, len(record.watchers), len(watcher_packets),
             )
 
-        spawn_func(_notify_watchers())
+        fanout_func(record.num, _notify_watchers())
