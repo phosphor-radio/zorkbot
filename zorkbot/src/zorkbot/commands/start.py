@@ -24,7 +24,7 @@ async def handle_start(
 ) -> None:
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you — please send an Advert.")
+        await ctx.reply("Cannot identify you - please send an Advert.")
         return
 
     # Check one-active-state-per-player rule.
@@ -46,7 +46,7 @@ async def handle_start(
         contact = meshcore.get_contact_by_key_prefix(player_id)
         if contact is None:
             await ctx.reply(
-                "DM me !start — I don't have you in my contacts yet."
+                "DM me !start - I don't have you in my contacts yet."
             )
             return
 
@@ -56,7 +56,7 @@ async def handle_start(
     try:
         await game.start_session(player_id)
     except SessionFullError:
-        await ctx.reply("All game slots are active right now — try again shortly.")
+        await ctx.reply("All game slots are active right now - try again shortly.")
         return
     except GameServiceError as exc:
         await ctx.reply(f"Could not start game: {exc}")
@@ -78,7 +78,7 @@ async def handle_start(
     else:
         # Acknowledge on channel, send intro via DM.
         await ctx.reply(
-            f"Zork I Session #{record.num} started for {player_name} — check your DMs!"
+            f"Zork I Session #{record.num} started for {player_name} - check your DMs!"
         )
         await send_dm_func(player_id, intro)
 

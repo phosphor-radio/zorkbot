@@ -6,41 +6,67 @@ import logging
 
 from zorkbot.context import Context
 from zorkbot.game_client import GameClient, GameServiceError, SessionNotFoundError
-from zorkbot.packetize import packetize
+from zorkbot.packetize import (
+    DEFAULT_MAX_CHARS,
+    add_sequence_prefixes,
+    pack_lines,
+    packetize,
+)
 from zorkbot.sanitize import NotAllowedError, validate
 from zorkbot.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
 # Manually-grouped packets, each under 120 chars with newlines preserved.
-_HELP_PACKET_1 = (
-    "!start — begin or resume game\n!end — save & quit\n"
-    "!list — active sessions\n!watch <N> — observe a session"
-)
-
-# Channel !help — !reset is DM-only, so it's omitted here. !author and
-# !uptime are channel-only, so they're shown here and not in the DM packets.
-_HELP_PACKETS = [
-    _HELP_PACKET_1,
-    "!watchers — list all observers\n!author — bot info & source\n!uptime — bot uptime",
+# ASCII hyphens rather than em-dashes throughout: an em-dash costs 3 bytes
+# to a hyphen's 1, and the packet budget is counted in characters while the
+# radio counts bytes.
+_HELP_LINES_1 = [
+    "!start - begin/resume game",
+    "!end - save & quit",
+    "!list - active sessions",
+    "!watch <N> - observe session",
 ]
+_HELP_PACKET_1 = "\n".join(_HELP_LINES_1)
+
+# Channel !help - !reset is DM-only, so it's omitted here. !author and
+# !uptime are channel-only, so they're shown here and not in the DM packets.
+_CHANNEL_HELP_LINES_2 = [
+    "!watchers - list all observers",
+    "!author - bot info & source",
+    "!uptime - bot uptime",
+]
+_HELP_PACKETS = [_HELP_PACKET_1, "\n".join(_CHANNEL_HELP_LINES_2)]
 HELP_TEXT = "\n".join(_HELP_PACKETS)
+
+
+def channel_help_packets(max_chars: int = DEFAULT_MAX_CHARS) -> list[str]:
+    return add_sequence_prefixes(
+        [_HELP_PACKET_1, *pack_lines(_CHANNEL_HELP_LINES_2, max_chars)]
+    )
+
 
 # DM !help, packet 2. Ends with a pointer back to the game channel, since a DM
 # session gives no other hint that #zork (or whatever it's configured as)
-# exists — parametrized on channel_name rather than hardcoded, so it stays
+# exists - parametrized on channel_name rather than hardcoded, so it stays
 # correct if [channel].name is changed. !rules only applies to a player with
 # an active session, so it's folded in for that case rather than shown always.
-def _dm_help_packet_2(channel_name: str, *, in_session: bool) -> str:
-    lines = ["!watchers — list all observers", "!reset — wipe save & restart"]
+def _dm_help_lines_2(channel_name: str, *, in_session: bool) -> list[str]:
+    lines = ["!watchers - list all observers", "!reset - wipe save & restart"]
     if in_session:
-        lines.append("!rules — basic rules")
+        lines.append("!rules - basic rules")
     lines.append(f"Join {channel_name} and send !help for more info")
-    return "\n".join(lines)
+    return lines
 
 
-def dm_help_packets(channel_name: str, *, in_session: bool) -> list[str]:
-    return [_HELP_PACKET_1, _dm_help_packet_2(channel_name, in_session=in_session)]
+def dm_help_packets(
+    channel_name: str, *, in_session: bool, max_chars: int = DEFAULT_MAX_CHARS
+) -> list[str]:
+    # Packed rather than hand-grouped: the sequence prefix and a long
+    # [channel].name both eat into the budget, and one more packet is
+    # better than one packet over the radio's limit.
+    lines = _dm_help_lines_2(channel_name, in_session=in_session)
+    return add_sequence_prefixes([_HELP_PACKET_1, *pack_lines(lines, max_chars)])
 
 AUTHOR_TEXT = """Meshcore: phr5\U0001f427
 Discord: @phosphor_radio
@@ -86,13 +112,13 @@ async def handle_game_command(
     """Process a bare game command from a DM session."""
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you — please send an Advert.")
+        await ctx.reply("Cannot identify you - please send an Advert.")
         return
 
     record = state.get_session(player_id)
     if record is None:
         await ctx.reply(
-            "No active session — send !start to begin."
+            "No active session - send !start to begin."
         )
         return
 
@@ -114,7 +140,7 @@ async def handle_game_command(
     except GameServiceError as exc:
         msg = str(exc)
         if "busy" in msg.lower():
-            await ctx.reply("The game is busy — try again in a moment.")
+            await ctx.reply("The game is busy - try again in a moment.")
         else:
             await ctx.reply(f"Game error: {msg}")
         return

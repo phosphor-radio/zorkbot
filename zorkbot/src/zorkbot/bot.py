@@ -21,7 +21,7 @@ from zorkbot.commands.uptime import handle_uptime
 from zorkbot.commands.watch import handle_watch
 from zorkbot.commands.watchers import handle_watchers
 from zorkbot.commands.zork import (
-    _HELP_PACKETS,
+    channel_help_packets,
     dm_help_packets,
     handle_game_command,
 )
@@ -443,9 +443,13 @@ class ZorkBot:
                 and self._state.active_state(ctx.pubkey_prefix or "") == "playing"
             )
             if ctx.is_dm:
-                packets = dm_help_packets(ctx.config.channel.name, in_session=in_session)
+                packets = dm_help_packets(
+                    ctx.config.channel.name,
+                    in_session=in_session,
+                    max_chars=ctx.config.packet_max_chars,
+                )
             else:
-                packets = _HELP_PACKETS
+                packets = channel_help_packets(ctx.config.packet_max_chars)
             await ctx.reply_many(packets)
             return
 

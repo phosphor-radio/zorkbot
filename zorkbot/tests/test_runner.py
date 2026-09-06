@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -255,3 +256,219 @@ async def test_flush_gives_up_after_cap():
 
     assert flushed == runner_module._MAX_FLUSH_MESSAGES
     assert meshcore.commands.get_msg.await_count == runner_module._MAX_FLUSH_MESSAGES
+
+
+# ----------------------------------------------------------------------
+# Send gate: spacing, the post-channel-receive guard, adverts, overflow
+# ----------------------------------------------------------------------
+
+
+def _make_gate_runner(spacing: float = 0.0, guard: float = 0.0, max_depth: int = 64):
+    """A runner whose config carries real numbers, for exercising the gate."""
+    mc = MagicMock()
+    mc.commands.send_msg = AsyncMock(return_value="ok")
+    mc.commands.send_chan_msg = AsyncMock(return_value="ok")
+    mc.commands.send_advert = AsyncMock(return_value="ok")
+    bot = MagicMock()
+    bot.config.send_spacing_seconds = spacing
+    bot.config.channel_rx_guard_seconds = guard
+    bot.config.max_send_queue_depth = max_depth
+    bot.event_sink.message_tx = MagicMock()
+    return MeshCoreRunner(bot, mc), mc
+
+
+@pytest.mark.asyncio
+async def test_spacing_is_shared_across_dm_and_channel() -> None:
+    """One gate, one clock: a DM does not get to ignore the gap left by a
+    channel message, or the other way round."""
+    runner, mc = _make_gate_runner(spacing=0.05)
+    loop = asyncio.get_running_loop()
+    stamps: list[float] = []
+
+    async def stamp(*args, **kwargs):
+        stamps.append(loop.time())
+        return "ok"
+
+    mc.commands.send_msg = AsyncMock(side_effect=stamp)
+    mc.commands.send_chan_msg = AsyncMock(side_effect=stamp)
+
+    await asyncio.gather(
+        runner._send_dm(PUBKEY_PREFIX, "dm one"),
+        runner._send_chan_msg(1, "chan one"),
+        runner._send_dm(PUBKEY_PREFIX, "dm two"),
+    )
+
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    assert len(gaps) == 2
+    assert all(gap >= 0.05 for gap in gaps), gaps
+
+
+@pytest.mark.asyncio
+async def test_adverts_wait_their_turn_on_the_send_gate() -> None:
+    """An advert is RF too - and a flood advert reaches further than any
+    message - so it must not transmit on top of one."""
+    from zorkbot.advertiser import Advertiser
+
+    runner, mc = _make_gate_runner(spacing=0.05)
+    loop = asyncio.get_running_loop()
+    stamps: list[tuple[str, float]] = []
+
+    async def msg(*args, **kwargs):
+        stamps.append(("msg", loop.time()))
+        return "ok"
+
+    async def advert(*args, **kwargs):
+        stamps.append(("advert", loop.time()))
+        return "ok"
+
+    mc.commands.send_msg = AsyncMock(side_effect=msg)
+    mc.commands.send_advert = AsyncMock(side_effect=advert)
+
+    advertiser = Advertiser(enabled=True, cooldown_seconds=0)
+    advertiser.set_transmit(runner.send_advert)
+
+    await asyncio.gather(
+        runner._send_dm(PUBKEY_PREFIX, "one"),
+        advertiser.send_if_due(mc),
+        runner._send_dm(PUBKEY_PREFIX, "two"),
+    )
+
+    assert any(kind == "advert" for kind, _ in stamps), stamps
+    times = [t for _, t in stamps]
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    assert all(gap >= 0.05 for gap in gaps), stamps
+
+
+@pytest.mark.asyncio
+async def test_advert_falls_back_to_the_radio_when_no_gate_is_wired() -> None:
+    """Simulate mode has no runner to inject a gate, and must still work."""
+    from zorkbot.advertiser import Advertiser
+
+    mc = MagicMock()
+    mc.commands.send_advert = AsyncMock(return_value="ok")
+    advertiser = Advertiser(enabled=True, cooldown_seconds=0)
+
+    await advertiser.send_if_due(mc)
+
+    mc.commands.send_advert.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_channel_receive_holds_off_the_next_transmission() -> None:
+    """The first reply packet is the one with no spacing in front of it, so
+    the guard is measured from the inbound flood instead."""
+    runner, _ = _make_gate_runner(spacing=0.0, guard=0.2)
+    loop = asyncio.get_running_loop()
+
+    runner._note_channel_rx()
+    started = loop.time()
+    await runner._send_chan_msg(1, "reply")
+
+    assert loop.time() - started >= 0.2
+
+
+@pytest.mark.asyncio
+async def test_dm_traffic_is_not_guarded_when_no_channel_message_arrived() -> None:
+    """A DM is addressed, not flooded, so nothing repeats it across the mesh
+    and there is nothing to wait out."""
+    runner, _ = _make_gate_runner(spacing=0.0, guard=0.5)
+    loop = asyncio.get_running_loop()
+
+    started = loop.time()
+    await runner._send_dm(PUBKEY_PREFIX, "reply")
+
+    assert loop.time() - started < 0.5
+
+
+@pytest.mark.asyncio
+async def test_zero_guard_disables_the_hold_off() -> None:
+    runner, _ = _make_gate_runner(spacing=0.0, guard=0.0)
+    loop = asyncio.get_running_loop()
+
+    runner._note_channel_rx()
+    started = loop.time()
+    await runner._send_chan_msg(1, "reply")
+
+    assert loop.time() - started < 0.1
+
+
+@pytest.mark.asyncio
+async def test_overflow_drop_does_not_leak_the_send_coroutine() -> None:
+    """The dropped packet's coroutine is built by the caller. Left unawaited
+    it warns at collection time - noise in exactly the log being read to
+    understand the overflow."""
+    import gc
+    import warnings
+
+    runner, _ = _make_gate_runner(max_depth=0)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = await runner._send_dm(PUBKEY_PREFIX, "dropped")
+        gc.collect()
+
+    assert result is None
+    assert not [w for w in caught if "never awaited" in str(w.message)], [
+        str(w.message) for w in caught
+    ]
+
+
+@pytest.mark.asyncio
+async def test_guard_and_spacing_are_independent_deadlines() -> None:
+    """Spacing 5, guard 2, last TX at t=0, channel message at t=1.
+
+    Both deadlines are enforced and neither overrides the other: spacing
+    lands at t=5, the guard at t=3, so the packet goes at t=5 - the guard
+    satisfied on the way past rather than ignored.
+    """
+    runner, _ = _make_gate_runner(spacing=0.5, guard=0.2)
+    loop = asyncio.get_running_loop()
+
+    now = loop.time()
+    runner._last_send_at = now
+    runner._last_channel_rx_at = now + 0.1
+
+    started = loop.time()
+    await runner._wait_for_quiet_air()
+    waited = loop.time() - started
+
+    assert 0.5 <= waited < 0.7, waited
+
+
+@pytest.mark.asyncio
+async def test_guard_governs_alone_when_nothing_was_just_transmitted() -> None:
+    """Same guard, but with an idle transmitter there is no spacing deadline
+    to wait on, so the reply goes out as soon as the flood has settled."""
+    runner, _ = _make_gate_runner(spacing=0.5, guard=0.2)
+    loop = asyncio.get_running_loop()
+
+    runner._last_send_at = None
+    runner._last_channel_rx_at = loop.time()
+
+    started = loop.time()
+    await runner._wait_for_quiet_air()
+    waited = loop.time() - started
+
+    assert 0.2 <= waited < 0.4, waited
+
+
+@pytest.mark.asyncio
+async def test_a_channel_message_arriving_mid_wait_re_arms_the_guard() -> None:
+    """The deadline is re-checked after sleeping, so a flood that starts
+    while a packet is already queued still gets its quiet period."""
+    runner, _ = _make_gate_runner(spacing=0.0, guard=0.2)
+    loop = asyncio.get_running_loop()
+
+    runner._note_channel_rx()
+
+    async def second_message() -> None:
+        await asyncio.sleep(0.15)
+        runner._note_channel_rx()
+
+    started = loop.time()
+    await asyncio.gather(runner._wait_for_quiet_air(), second_message())
+    waited = loop.time() - started
+
+    # Without the re-check this returns at ~0.2; the second message pushes
+    # the deadline out to ~0.35.
+    assert waited >= 0.34, waited

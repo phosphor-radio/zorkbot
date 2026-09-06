@@ -19,7 +19,7 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
 
     player_id = ctx.pubkey_prefix
     if not player_id:
-        await ctx.reply("Cannot identify you — please send an Advert.")
+        await ctx.reply("Cannot identify you - please send an Advert.")
         return
 
     # Remove any existing session from state (no end_session call; reset handles it).
@@ -31,7 +31,7 @@ async def handle_reset(ctx: Context, game: GameClient, state: SessionState) -> N
     try:
         await game.reset_session(player_id)
     except SessionFullError:
-        await ctx.reply("All game slots are active — could not restart. Try again shortly.")
+        await ctx.reply("All game slots are active - could not restart. Try again shortly.")
         return
     except GameServiceError as exc:
         await ctx.reply(f"Reset failed: {exc}")

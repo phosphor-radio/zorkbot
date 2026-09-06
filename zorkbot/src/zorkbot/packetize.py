@@ -77,6 +77,42 @@ def packetize(
     return packets
 
 
+def pack_lines(lines: list[str], max_chars: int = DEFAULT_MAX_CHARS) -> list[str]:
+    """Greedily group whole lines into packets that fit the budget.
+
+    For line-oriented text where a line must not be split mid-way - the
+    !help command lists - as opposed to the prose reflowing packetize()
+    does. Room for a sequence prefix is reserved the same way, so callers
+    can hand the result straight to add_sequence_prefixes().
+    """
+    budget = max_chars - _sequence_prefix_len(99)
+    packets: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        if current and len("\n".join([*current, line])) > budget:
+            packets.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        packets.append("\n".join(current))
+    return packets
+
+
+def add_sequence_prefixes(packets: list[str]) -> list[str]:
+    """Prefix each packet with (index/total), the same marker packetize()
+    applies to split output.
+
+    For text grouped by hand rather than packed here — the !help packets —
+    so a reader can tell that one went missing rather than reading a short
+    list as the whole list. A single packet is left alone, as in packetize().
+    """
+    total = len(packets)
+    if total <= 1:
+        return list(packets)
+    return [f"({index}/{total}) {packet}" for index, packet in enumerate(packets, start=1)]
+
+
 def strip_ansi(text: str) -> str:
     text = _OSC_ESCAPE.sub("", text)
     return _ANSI_ESCAPE.sub("", text)
