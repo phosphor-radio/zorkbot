@@ -78,6 +78,11 @@ class ZorkBot:
         # Some of these never return (the session poller), so nothing may
         # wait on this set as a whole — see drain().
         self._background_tasks: set[asyncio.Task] = set()
+        # The subset of the above that does finish: work that still owes
+        # someone a reply. drain() waits on these, so a caller that drains
+        # before reading the replies (the simulator, the tests) sees a
+        # delayed answer instead of silence.
+        self._response_tasks: set[asyncio.Task] = set()
         # Per-session watcher fan-out: session_num -> queue of coroutines,
         # each with a single consumer task, so a session's watchers see its
         # output in order without the sender's worker waiting on delivery.
@@ -135,13 +140,18 @@ class ZorkBot:
     def set_startup_flushed_messages(self, count: int) -> None:
         self._startup_flushed_messages = count
 
+    def has_pending_replies(self) -> bool:
+        """Whether a spawned handler still owes a reply — what drain() waits
+        on beyond the command and fan-out queues."""
+        return bool(self._response_tasks)
+
     def start_session_poller(self) -> None:
         """Start polling the game service for sessions it ended server-side
         (inactivity timeout, PTY crash) so their watchers get notified — the
         bot has no other way to learn about those. No-op when disabled."""
         if self.config.session_poll_seconds <= 0:
             return
-        self._spawn(self._session_poll_loop())
+        self._spawn(self._session_poll_loop(), returns=False)
 
     async def _session_poll_loop(self) -> None:
         while True:
@@ -342,15 +352,22 @@ class ZorkBot:
                 name=f"zorkbot-worker-{player_id[:8]}",
             )
 
-    def _spawn(self, coro) -> None:
+    def _spawn(self, coro, *, returns: bool = True) -> None:
         """Run coro as a fire-and-forget task, not blocking the caller's
-        command queue. Tracked so stop() can cancel it on shutdown."""
+        command queue. Tracked so stop() can cancel it on shutdown.
+
+        returns=False marks a loop that runs until cancelled, which drain()
+        must not wait on.
+        """
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
+        if returns:
+            self._response_tasks.add(task)
         task.add_done_callback(self._on_background_done)
 
     def _on_background_done(self, task: asyncio.Task) -> None:
         self._background_tasks.discard(task)
+        self._response_tasks.discard(task)
         if not task.cancelled() and (exc := task.exception()) is not None:
             logger.error("background task failed", exc_info=exc)
 
@@ -532,6 +549,13 @@ class ZorkBot:
         # never returns).
         for q in list(self._fanout_queues.values()):
             await q.join()
+        # Replies that were spawned off the dispatch that produced them (the
+        # !bots roll call waits 5-10s before answering, so that mesh bots
+        # don't all transmit at once). Draining without these reports the bot
+        # silent while an answer is still on its way. Looped because such a
+        # task may itself spawn another.
+        while self._response_tasks:
+            await asyncio.gather(*self._response_tasks, return_exceptions=True)
 
     async def stop(self) -> None:
         # Close out session-history rows so they don't read as still-active
@@ -552,6 +576,7 @@ class ZorkBot:
         )
         self._workers.clear()
         self._background_tasks.clear()
+        self._response_tasks.clear()
         self._fanout_workers.clear()
         # Close fan-out that never got its turn, so it doesn't resurface as
         # a "coroutine was never awaited" warning at interpreter exit.

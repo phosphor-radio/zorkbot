@@ -148,3 +148,34 @@ async def test_simulator_shows_watcher_fanout_with_the_command_that_caused_it() 
     assert any("> north" in line for line in lines), (
         f"watcher fan-out never made it into the command's output: {lines}"
     )
+
+
+@pytest.mark.asyncio
+async def test_simulator_shows_the_delayed_bots_roll_call_reply() -> None:
+    """The !bots answer is spawned off its dispatch and sleeps before it
+    replies, so handle_line returns long before it arrives. drain() has to
+    wait for it, or the simulator reports "(no response)" for a command the
+    bot in fact answered.
+    """
+    from unittest.mock import patch
+
+    import zorkbot.commands.bots as bots_module
+    from zorkbot.channels import ChannelConfig
+
+    config = BotConfig(game_url="http://game:8080")
+    config.bots_enabled = True
+    config.bots_channel = ChannelConfig(index=2, name="#bots")
+
+    async with GameClient(config.game_url) as game:
+        sim = Simulator(_make_bot(config, game))
+        sim.channel_idx = config.bots_channel.index
+        # A real, if brief, sleep: the point is that drain() waits through an
+        # actual suspension, not that the delay is short.
+        with (
+            patch.object(bots_module, "REPLY_DELAY_BASE_SECONDS", 0.01),
+            patch.object(bots_module, "REPLY_DELAY_JITTER_SECONDS", 0.0),
+        ):
+            lines = await sim.handle_line("!bots")
+
+    assert any("zorkbot" in line for line in lines), lines
+    assert any(config.channel.name in line for line in lines), lines
