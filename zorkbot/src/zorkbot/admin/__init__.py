@@ -29,6 +29,7 @@ from zorkbot.admin.routes import auth as auth_routes
 from zorkbot.admin.routes import logs as logs_routes
 from zorkbot.admin.routes import meta as meta_routes
 from zorkbot.admin.routes import players as players_routes
+from zorkbot.admin.routes import radio as radio_routes
 from zorkbot.admin.routes import sessions as sessions_routes
 from zorkbot.admin.routes import stats as stats_routes
 from zorkbot.admin.store import Store
@@ -69,6 +70,7 @@ def create_app(ctx: AdminContext) -> FastAPI:
     app.include_router(players_routes.router, prefix="/api")
     app.include_router(meta_routes.router, prefix="/api")
     app.include_router(logs_routes.router, prefix="/api")
+    app.include_router(radio_routes.router, prefix="/api")
 
     @app.get("/health")
     async def health() -> dict:

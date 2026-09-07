@@ -207,6 +207,63 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; color: var(--text-di
   word-break: break-word;
 }
 
+.section-head { font-size: 14px; margin: 22px 0 8px; color: var(--text-dim); }
+
+.radio-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.radio-panel .radio-line {
+  margin: 0 0 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.radio-panel .radio-line:first-child { color: var(--text); font-size: 13px; }
+.radio-panel .radio-line:last-child { margin-bottom: 0; }
+.radio-stale { margin: 8px 0 0; font-size: 12px; color: var(--warning); }
+
+#radio-messages {
+  margin-top: 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+#radio-messages-note { margin: 8px 12px 0; }
+#radio-messages-list {
+  padding: 8px 0;
+  max-height: 360px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.msg-line {
+  display: flex;
+  gap: 10px;
+  padding: 1px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg-line:hover { background: var(--bg-elevated); }
+.msg-line .msg-at { color: var(--text-dim); flex: none; }
+.msg-line .msg-who { flex: none; min-width: 90px; font-weight: 600; }
+.msg-line .msg-text { flex: 1; min-width: 0; }
+/* Sent and received read differently at a glance; the bot's own output is
+   the bulk of any window, so it is the one that recedes. */
+.msg-line.msg-tx .msg-who { color: var(--text-dim); }
+.msg-line.msg-rx .msg-who { color: var(--accent); }
+/* A channel sender name is self-reported - see appendRadioMessage. */
+.msg-line .msg-unverified {
+  flex: none;
+  color: var(--warning);
+  font-size: 10px;
+  align-self: center;
+}
+
 /* Single-fact line above a panel — laid out as a row so further fields can
    join it without becoming a table. */
 .stat-line {

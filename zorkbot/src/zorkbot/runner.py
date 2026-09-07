@@ -335,11 +335,23 @@ class MeshCoreRunner:
             self.bot.event_sink.player_seen(
                 pubkey_prefix=message.pubkey_prefix, name=message.sender_name
             )
+        transport = "dm" if message.is_dm else "channel"
+        channel_idx = None if message.is_dm else message.channel_idx
         self.bot.event_sink.message_rx(
-            transport="dm" if message.is_dm else "channel",
-            channel_idx=None if message.is_dm else message.channel_idx,
+            transport=transport,
+            channel_idx=channel_idx,
             pubkey_prefix=message.pubkey_prefix,
             chars=len(message.text),
+        )
+        # Text, for the admin radio view's recent-message windows. The sink
+        # above records that a message happened and how long it was; this is
+        # the only thing that keeps what it said, and only in memory.
+        self.bot.message_windows.record_rx(
+            transport=transport,
+            channel_idx=channel_idx,
+            pubkey_prefix=message.pubkey_prefix,
+            sender_name=message.sender_name,
+            text=message.text,
         )
 
     async def _on_dm_msg(self, event: Event) -> None:
@@ -417,6 +429,7 @@ class MeshCoreRunner:
                 transport="dm",
                 pubkey_prefix=pubkey_prefix,
                 chars=len(text),
+                text=text,
             )
             return result is not None
 
@@ -438,6 +451,7 @@ class MeshCoreRunner:
             pubkey_prefix=pubkey_prefix,
             chars=len(text),
             ack_aware=True,
+            text=text,
         )
         return result is not None
 
@@ -456,6 +470,7 @@ class MeshCoreRunner:
             transport="dm",
             pubkey_prefix=pubkey_prefix,
             chars=len(text),
+            text=text,
         )
 
     async def send_advert(self, *, flood: bool) -> Any:
@@ -481,6 +496,7 @@ class MeshCoreRunner:
             transport="channel",
             channel_idx=channel_idx,
             chars=len(text),
+            text=text,
         )
 
     async def _wait_for_quiet_air(self) -> None:
@@ -527,6 +543,7 @@ class MeshCoreRunner:
         chars: int = 0,
         record: bool = True,
         ack_aware: bool = False,
+        text: str | None = None,
     ) -> Any:
         max_depth = self.bot.config.max_send_queue_depth
         if self._send_queue_depth >= max_depth:
@@ -595,6 +612,17 @@ class MeshCoreRunner:
                             chars=chars,
                             acked=acked,
                         )
+                        # Recorded here rather than at the call sites so it
+                        # lands on the same branch as the stats: past the
+                        # overflow drop, so the window holds what actually
+                        # went out. Adverts pass no text and record nothing.
+                        if text is not None:
+                            self.bot.message_windows.record_tx(
+                                transport=transport,
+                                channel_idx=channel_idx,
+                                pubkey_prefix=pubkey_prefix,
+                                text=text,
+                            )
                     return result
                 finally:
                     self._last_send_at = asyncio.get_running_loop().time()

@@ -37,6 +37,7 @@
         <button class="tab" data-tab="history">History</button>
         <button class="tab" data-tab="charts">Charts</button>
         <button class="tab" data-tab="players">Players</button>
+        <button class="tab" data-tab="radio">Radio</button>
         <button class="tab" data-tab="logs">Logs</button>
         <button class="tab" data-tab="settings">Settings</button>
       </nav>
@@ -135,6 +136,47 @@
           </thead>
           <tbody></tbody>
         </table>
+      </section>
+
+      <section id="tab-radio" class="tab-panel" hidden>
+        <h2>Radio</h2>
+        <div id="radio-panel" class="radio-panel">
+          <p class="mono">Loading…</p>
+        </div>
+
+        <h3 class="section-head">Channels</h3>
+        <table id="channels-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Name</th><th>Hash</th><th>Role</th>
+              <th>Msgs</th><th>Last message</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <h3 class="section-head">Contacts <span id="contacts-count" class="mono"></span></h3>
+        <div class="filters">
+          <button type="button" id="contacts-show" class="ghost">Show contacts</button>
+        </div>
+        <table id="contacts-table" hidden>
+          <thead>
+            <tr>
+              <th>Name</th><th>Pubkey</th><th>Type</th><th>Last advert</th>
+              <th>Distance</th><th>Routing</th><th>Path</th><th>Hash size</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <div id="radio-messages" hidden>
+          <div class="stream-head">
+            <span id="radio-messages-title"></span>
+            <button id="radio-messages-close" class="ghost">Close</button>
+          </div>
+          <p id="radio-messages-note" class="mono"></p>
+          <div id="radio-messages-list"></div>
+        </div>
       </section>
 
       <section id="tab-logs" class="tab-panel" hidden>

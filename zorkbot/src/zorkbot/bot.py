@@ -30,6 +30,8 @@ from zorkbot.config import BotConfig
 from zorkbot.context import Context, IncomingMessage, ReplyFunc
 from zorkbot.game_client import GameClient
 from zorkbot.cooldown import Cooldown
+from zorkbot.message_window import MessageWindows
+from zorkbot.radio_state import RadioState
 from zorkbot.session_state import SessionState
 from zorkbot.watcher_notify import notify_watchers_session_ended
 
@@ -68,6 +70,24 @@ class ZorkBot:
             event_sink=self._sink,
         )
         self._bots_cooldown = Cooldown(config.bots_cooldown_seconds)
+
+        # Radio introspection for the admin UI. Both are inert unless the
+        # admin UI reads them: the windows only fill from the runner's taps,
+        # and the cache only queries the device when asked.
+        served = {config.channel.index: "zork"}
+        if config.bots_enabled and config.bots_channel is not None:
+            served[config.bots_channel.index] = "bots"
+        self.message_windows = MessageWindows(
+            window=config.admin_ui.radio_message_window,
+            max_contacts=config.admin_ui.radio_message_contacts,
+            channels=served,
+            bot_name=config.name,
+        )
+        self.radio_state = RadioState(
+            meshcore,
+            cache_seconds=config.admin_ui.radio_cache_seconds,
+            served_channels=served,
+        )
 
         # Per-player asyncio queues: pubkey_prefix → asyncio.Queue
         self._queues: dict[str, asyncio.Queue] = {}

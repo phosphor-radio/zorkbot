@@ -19,6 +19,7 @@ _ADMIN_UI_KEYS = frozenset({
     "event_retention_days", "event_queue_size",
     "live_buffer_events", "max_live_streams",
     "log_buffer_lines", "max_log_streams",
+    "radio_cache_seconds", "radio_message_window", "radio_message_contacts",
 })
 _CHANNEL_KEYS = frozenset({"index", "name", "secret"})
 _ROOT_OPTIONAL_KEYS = frozenset({
@@ -69,6 +70,16 @@ class AdminUIConfig:
     # log tail is a live window, not a history — that is what SQLite is for.
     log_buffer_lines: int = 500
     max_log_streams: int = 2
+    # Radio view. The device query and channel sweep are serial round-trips
+    # with no push equivalent, so they are cached rather than read per
+    # request; RF settings do not change on their own.
+    radio_cache_seconds: float = 30.0
+    # Recent-message windows, held in RAM and never persisted. 0 disables
+    # message capture entirely. Contacts share an LRU pool of this many;
+    # the channels the bot serves get reserved windows outside it, so a busy
+    # channel cannot flush the contacts playing on it, or vice versa.
+    radio_message_window: int = 20
+    radio_message_contacts: int = 50
 
 
 @dataclass
@@ -285,6 +296,12 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
             ui.log_buffer_lines = int(admin_ui["log_buffer_lines"])
         if "max_log_streams" in admin_ui:
             ui.max_log_streams = int(admin_ui["max_log_streams"])
+        if "radio_cache_seconds" in admin_ui:
+            ui.radio_cache_seconds = float(admin_ui["radio_cache_seconds"])
+        if "radio_message_window" in admin_ui:
+            ui.radio_message_window = int(admin_ui["radio_message_window"])
+        if "radio_message_contacts" in admin_ui:
+            ui.radio_message_contacts = int(admin_ui["radio_message_contacts"])
 
 
 def _warn_misplaced_section_keys(section: str, values: dict, allowed: frozenset[str]) -> None:

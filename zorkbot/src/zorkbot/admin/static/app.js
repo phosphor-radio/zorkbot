@@ -19,6 +19,8 @@ const state = {
   logRecords: [],
   logLastSeq: 0,
   uptimeTimer: null,
+  radioTimer: null,
+  contactsShown: false,
 };
 
 function setTokens(resp) {
@@ -227,6 +229,8 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
   stopLive();
   stopLogStream();
   stopUptimePolling();
+  stopRadioPolling();
+  resetRadioView();
   resetLogView();
   if (state.refreshToken) {
     try {
@@ -257,6 +261,8 @@ for (const btn of document.querySelectorAll(".tab")) {
     if (btn.dataset.tab === "history") loadHistory(true);
     if (btn.dataset.tab === "charts") loadCharts();
     if (btn.dataset.tab === "players") loadPlayers();
+    if (btn.dataset.tab === "radio") startRadioPolling();
+    else stopRadioPolling();
     // Log streams are capped server-side (max_log_streams, default 2), so the
     // stream is dropped the moment the tab loses focus rather than held open
     // for a view nobody is looking at. The uptime poll goes with it.
@@ -597,6 +603,286 @@ async function loadCharts() {
 document.getElementById("chart-range").addEventListener("change", loadCharts);
 for (const input of document.querySelectorAll("input[name='rx-transport'], input[name='tx-transport']")) {
   input.addEventListener("change", loadCharts);
+}
+
+// ---------------------------------------------------------------------
+// Radio. Node state, channels and contacts, plus the recent-message windows
+// the bot keeps in memory for the channels it serves.
+// ---------------------------------------------------------------------
+
+// RF settings do not change on their own, and the server caches the device
+// query behind radio_cache_seconds anyway — a faster poll returns identical
+// bytes at the cost of serial traffic on a Pi.
+const RADIO_POLL_MS = 30000;
+
+const radioPanelEl = document.getElementById("radio-panel");
+const contactsTableEl = document.getElementById("contacts-table");
+const contactsCountEl = document.getElementById("contacts-count");
+const radioMessagesEl = document.getElementById("radio-messages");
+
+function startRadioPolling() {
+  refreshRadio();
+  stopRadioPolling();
+  state.radioTimer = setInterval(refreshRadio, RADIO_POLL_MS);
+}
+
+function stopRadioPolling() {
+  if (state.radioTimer) {
+    clearInterval(state.radioTimer);
+    state.radioTimer = null;
+  }
+}
+
+function resetRadioView() {
+  state.contactsShown = false;
+  contactsTableEl.hidden = true;
+  closeRadioMessages();
+}
+
+async function refreshRadio() {
+  try {
+    await Promise.all([loadRadioPanel(), loadChannels()]);
+    if (state.contactsShown) await loadContacts();
+  } catch (e) {
+    /* transient; the next poll retries */
+  }
+}
+
+// Every value below is either a number the server computed or a string from
+// the mesh, so the panel is built with textContent rather than innerHTML.
+function loadRadioPanelInto(el, data) {
+  el.replaceChildren();
+  if (!data.connected) {
+    const p = document.createElement("p");
+    p.className = "mono";
+    p.textContent = "No radio connected.";
+    el.appendChild(p);
+    return;
+  }
+
+  const r = data.radio || {};
+  const fw = data.firmware || {};
+  const loc = data.location || {};
+  const rows = [
+    [data.name || "—", data.public_key || "", fwLabel(fw)],
+    [
+      `${num(r.freq_mhz)} MHz`,
+      `BW ${num(r.bandwidth_khz)} kHz`,
+      `SF${num(r.spreading_factor)}`,
+      `CR${num(r.coding_rate)}`,
+      `${num(r.tx_power_dbm)} dBm${r.max_tx_power_dbm != null ? ` / ${r.max_tx_power_dbm}` : ""}`,
+      // null means the firmware did not report it, which is not the same
+      // fact as a path hash size of zero.
+      `path hash ${r.path_hash_size == null ? "unknown" : r.path_hash_size + " B"}`,
+    ],
+    [loc.set ? `${loc.lat}, ${loc.lon}` : "location not set"],
+  ];
+
+  for (const parts of rows) {
+    const line = document.createElement("p");
+    line.className = "radio-line";
+    line.textContent = parts.filter((p) => p !== "").join(" \u00b7 ");
+    el.appendChild(line);
+  }
+
+  if (data.stale_since) {
+    const warn = document.createElement("p");
+    warn.className = "radio-stale";
+    warn.textContent = `Radio unreachable — showing values from ${fmtTime(data.stale_since)}.`;
+    el.appendChild(warn);
+  }
+
+  contactsCountEl.textContent = countLabel(data.contacts);
+}
+
+function fwLabel(fw) {
+  return [fw.model, fw.version].filter(Boolean).join(" \u00b7 ");
+}
+
+function num(v) {
+  return v == null ? "?" : v;
+}
+
+function countLabel(c) {
+  if (!c) return "";
+  return c.max != null ? `${c.count} / ${c.max}` : String(c.count);
+}
+
+async function loadRadioPanel() {
+  const resp = await api("/radio");
+  loadRadioPanelInto(radioPanelEl, await resp.json());
+}
+
+async function loadChannels() {
+  const resp = await api("/radio/channels");
+  const data = await resp.json();
+  const tbody = document.querySelector("#channels-table tbody");
+  tbody.replaceChildren();
+
+  for (const c of data.channels || []) {
+    const tr = document.createElement("tr");
+    // n/a and — are different answers. An untracked channel is one the bot
+    // does not watch at all; a tracked one with no traffic is simply quiet.
+    // Rendering both as a dash would call an unmonitored channel silent.
+    const count = c.tracked ? String(c.message_count) : "n/a";
+    const last = c.tracked ? (c.last_message_at ? fmtTime(c.last_message_at) : "\u2014") : "n/a";
+    appendCells(tr, [
+      String(c.idx), c.name || "\u2014", c.hash || "\u2014",
+      c.role || "\u2014", count, last,
+    ]);
+    const actions = document.createElement("td");
+    if (c.tracked) {
+      const btn = document.createElement("button");
+      btn.className = "link";
+      btn.textContent = "Messages";
+      btn.addEventListener("click", () => openChannelMessages(c.idx, c.name));
+      actions.appendChild(btn);
+    }
+    tr.appendChild(actions);
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadContacts() {
+  const resp = await api("/radio/contacts");
+  const data = await resp.json();
+  const tbody = document.querySelector("#contacts-table tbody");
+  tbody.replaceChildren();
+
+  const contacts = data.contacts || [];
+  if (contacts.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 9;
+    td.className = "mono";
+    td.textContent = "No contacts.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const c of contacts) {
+    const tr = document.createElement("tr");
+    appendCells(tr, [
+      c.name || "\u2014",
+      c.pubkey_prefix,
+      c.type,
+      c.last_advert_at ? fmtTime(c.last_advert_at) : "\u2014",
+      c.distance_km == null ? "\u2014" : `${c.distance_km} km`,
+      // "flood" is a routing mode, not a missing hop count.
+      c.routing === "flood" ? "flood" : `${c.hops} hop${c.hops === 1 ? "" : "s"}`,
+      c.path || "\u2014",
+      c.path_hash_size == null ? "\u2014" : `${c.path_hash_size} B`,
+    ]);
+    const actions = document.createElement("td");
+    if (c.message_count > 0) {
+      const btn = document.createElement("button");
+      btn.className = "link";
+      btn.textContent = `Messages (${c.message_count})`;
+      btn.addEventListener("click", () => openContactMessages(c.pubkey_prefix, c.name));
+      actions.appendChild(btn);
+    }
+    tr.appendChild(actions);
+    tbody.appendChild(tr);
+  }
+}
+
+function appendCells(tr, values) {
+  for (const value of values) {
+    const td = document.createElement("td");
+    td.textContent = value;
+    tr.appendChild(td);
+  }
+}
+
+document.getElementById("contacts-show").addEventListener("click", async () => {
+  state.contactsShown = !state.contactsShown;
+  contactsTableEl.hidden = !state.contactsShown;
+  document.getElementById("contacts-show").textContent = state.contactsShown
+    ? "Hide contacts"
+    : "Show contacts";
+  if (state.contactsShown) await loadContacts();
+});
+
+function closeRadioMessages() {
+  radioMessagesEl.hidden = true;
+}
+
+document.getElementById("radio-messages-close").addEventListener("click", closeRadioMessages);
+
+async function openContactMessages(prefix, name) {
+  await openRadioMessages(
+    `/radio/contacts/${encodeURIComponent(prefix)}/messages`,
+    `Messages with ${name || prefix}`
+  );
+}
+
+async function openChannelMessages(idx, name) {
+  await openRadioMessages(
+    `/radio/channels/${encodeURIComponent(idx)}/messages`,
+    `Messages on ${name || "channel " + idx}`
+  );
+}
+
+async function openRadioMessages(path, title) {
+  const list = document.getElementById("radio-messages-list");
+  document.getElementById("radio-messages-title").textContent = title;
+  list.replaceChildren();
+  radioMessagesEl.hidden = false;
+
+  const note = document.getElementById("radio-messages-note");
+  const resp = await api(path);
+  if (!resp.ok) {
+    note.textContent = "Could not load messages.";
+    return;
+  }
+  const data = await resp.json();
+  note.textContent = data.since_process_start
+    ? `Last ${data.window} messages seen since the bot started \u2014 not a full history.`
+    : "";
+
+  if (!data.messages || data.messages.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = "Nothing seen yet.";
+    list.appendChild(empty);
+    return;
+  }
+  for (const m of data.messages) appendRadioMessage(list, m);
+  list.scrollTop = list.scrollHeight;
+}
+
+// Message text and sender names come from the mesh, so both go in via
+// textContent — the same rule the log tail follows.
+function appendRadioMessage(list, m) {
+  const row = document.createElement("div");
+  row.className = `msg-line msg-${m.direction}`;
+
+  const at = document.createElement("span");
+  at.className = "msg-at";
+  at.textContent = new Date(m.at * 1000).toLocaleTimeString();
+
+  const who = document.createElement("span");
+  who.className = "msg-who";
+  who.textContent = m.sender_name || (m.pubkey_prefix || "?").slice(0, 8);
+
+  const text = document.createElement("span");
+  text.className = "msg-text";
+  text.textContent = m.text;
+
+  row.append(at, who);
+  // A channel message carries no sender key material, so the name is
+  // whatever the sender typed. Saying so is the point: rendering a claimed
+  // name like a cryptographic one teaches the operator to trust it.
+  if (!m.sender_verified) {
+    const mark = document.createElement("span");
+    mark.className = "msg-unverified";
+    mark.textContent = "unverified";
+    mark.title = "Channel messages carry no sender identity; this name is self-reported.";
+    row.appendChild(mark);
+  }
+  row.appendChild(text);
+  list.appendChild(row);
 }
 
 // ---------------------------------------------------------------------
