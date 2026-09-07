@@ -21,6 +21,7 @@ const state = {
   uptimeTimer: null,
   radioTimer: null,
   contactsShown: false,
+  radioWrites: false,
 };
 
 function setTokens(resp) {
@@ -619,6 +620,14 @@ const radioPanelEl = document.getElementById("radio-panel");
 const contactsTableEl = document.getElementById("contacts-table");
 const contactsCountEl = document.getElementById("contacts-count");
 const radioMessagesEl = document.getElementById("radio-messages");
+const channelAddEl = document.getElementById("channel-add");
+const channelFormEl = document.getElementById("channel-add-form");
+const channelSlotEl = document.getElementById("channel-add-slot");
+const channelNameEl = document.getElementById("channel-add-name");
+const channelKeyEl = document.getElementById("channel-add-key");
+const channelKeyLabelEl = document.getElementById("channel-add-key-label");
+const channelNoteEl = document.getElementById("channel-add-note");
+const channelErrorEl = document.getElementById("channel-add-error");
 
 function startRadioPolling() {
   refreshRadio();
@@ -637,11 +646,16 @@ function resetRadioView() {
   state.contactsShown = false;
   contactsTableEl.hidden = true;
   closeRadioMessages();
+  closeChannelForm();
 }
 
 async function refreshRadio() {
   try {
-    await Promise.all([loadRadioPanel(), loadChannels()]);
+    // The panel first, not in parallel: it carries writes.enabled, and the
+    // channel view needs to know whether to offer the Add form before it
+    // renders. Two sequential requests on a 30 s poll cost nothing.
+    await loadRadioPanel();
+    await loadChannels();
     if (state.contactsShown) await loadContacts();
   } catch (e) {
     /* transient; the next poll retries */
@@ -652,6 +666,8 @@ async function refreshRadio() {
 // the mesh, so the panel is built with textContent rather than innerHTML.
 function loadRadioPanelInto(el, data) {
   el.replaceChildren();
+  // Before the connected check: this reports config, not radio state.
+  state.radioWrites = !!(data.writes && data.writes.enabled);
   if (!data.connected) {
     const p = document.createElement("p");
     p.className = "mono";
@@ -731,6 +747,7 @@ async function loadChannels() {
       c.role || "\u2014", count, last,
     ]);
     const actions = document.createElement("td");
+    actions.className = "row-actions";
     if (c.tracked) {
       const btn = document.createElement("button");
       btn.className = "link";
@@ -738,8 +755,130 @@ async function loadChannels() {
       btn.addEventListener("click", () => openChannelMessages(c.idx, c.name));
       actions.appendChild(btn);
     }
+    if (c.editable) {
+      const btn = document.createElement("button");
+      btn.className = "link";
+      btn.textContent = "Remove";
+      btn.addEventListener("click", () => removeChannel(c.idx, c.name));
+      actions.appendChild(btn);
+    } else if (c.role) {
+      // Not a disabled button: this row is not a thing the console edits.
+      // The bot rewrites its own channels from config on every startup.
+      const owned = document.createElement("span");
+      owned.className = "mono";
+      owned.textContent = "config";
+      owned.title = `owned by ${c.role === "zork" ? "[channel]" : "[bots_channel]"} in zorkbot.toml`;
+      actions.appendChild(owned);
+    }
     tr.appendChild(actions);
     tbody.appendChild(tr);
+  }
+
+  refreshChannelForm(data.free_slots || []);
+}
+
+// ---------------------------------------------------------------------
+// Channel writes. Add and remove are the same firmware command — there is
+// no delete on the device, only assignment to a slot that always exists.
+// See docs/specs/admin-radio-edit.md.
+// ---------------------------------------------------------------------
+
+function refreshChannelForm(freeSlots) {
+  const offer = state.radioWrites && freeSlots.length > 0;
+  channelAddEl.hidden = !offer;
+  if (!offer) {
+    closeChannelForm();
+    return;
+  }
+  const previous = channelSlotEl.value;
+  channelSlotEl.replaceChildren();
+  for (const idx of freeSlots) {
+    const option = document.createElement("option");
+    option.value = String(idx);
+    option.textContent = String(idx);
+    channelSlotEl.appendChild(option);
+  }
+  if (freeSlots.includes(Number(previous))) channelSlotEl.value = previous;
+}
+
+function closeChannelForm() {
+  channelFormEl.hidden = true;
+  channelFormEl.reset();
+  // The key is the only secret typed into this console; it should not
+  // outlive the request that carries it.
+  channelKeyEl.value = "";
+  channelErrorEl.textContent = "";
+  syncChannelKeyField();
+}
+
+// The server enforces these rules regardless — the form is not the only
+// caller — but mirroring them here means the operator learns them by using
+// it rather than by collecting 400s.
+function syncChannelKeyField() {
+  const isPublic = channelNameEl.value.trim().startsWith("#");
+  channelKeyEl.disabled = isPublic;
+  channelKeyEl.required = !isPublic;
+  channelKeyLabelEl.hidden = isPublic;
+  if (isPublic) channelKeyEl.value = "";
+  channelNoteEl.textContent = isPublic
+    ? "Names starting with # are public: the key is derived from the name, so anyone who knows it can join."
+    : "This key is never shown again. Keep it wherever you keep the channel's other copies.";
+}
+
+channelNameEl.addEventListener("input", syncChannelKeyField);
+
+document.getElementById("channel-add-show").addEventListener("click", () => {
+  channelFormEl.hidden = !channelFormEl.hidden;
+  if (channelFormEl.hidden) closeChannelForm();
+  else syncChannelKeyField();
+});
+
+document.getElementById("channel-add-cancel").addEventListener("click", closeChannelForm);
+
+channelFormEl.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  channelErrorEl.textContent = "";
+  const name = channelNameEl.value.trim();
+  const body = { name };
+  if (!name.startsWith("#")) body.secret = channelKeyEl.value.trim();
+
+  const resp = await api(`/radio/channels/${encodeURIComponent(channelSlotEl.value)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    channelErrorEl.textContent = await errorText(resp, "Could not add the channel.");
+    return;
+  }
+  closeChannelForm();
+  await loadChannels();
+});
+
+async function removeChannel(idx, name) {
+  const ok = window.confirm(
+    `Remove ${name} from slot ${idx}?\n\n` +
+      "The console cannot show you the key again, so re-adding it means having " +
+      "your own copy."
+  );
+  if (!ok) return;
+
+  const resp = await api(`/radio/channels/${encodeURIComponent(idx)}`, { method: "DELETE" });
+  if (!resp.ok) {
+    window.alert(await errorText(resp, "Could not remove the channel."));
+    return;
+  }
+  await loadChannels();
+}
+
+// Error bodies from this API are {detail: {error, error_description}}; the
+// description is written for the operator, so prefer it over a generic line.
+async function errorText(resp, fallback) {
+  try {
+    const body = await resp.json();
+    return (body.detail && body.detail.error_description) || fallback;
+  } catch (e) {
+    return fallback;
   }
 }
 

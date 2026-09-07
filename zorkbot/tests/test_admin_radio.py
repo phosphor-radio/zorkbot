@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from hashlib import sha256
 
 from zorkbot.admin import create_app
 from zorkbot.admin.auth import DEFAULT_PASSWORD, AuthService
@@ -23,7 +24,12 @@ from zorkbot.cli import _StubMeshCore
 from zorkbot.config import BotConfig
 from zorkbot.game_client import GameClient
 from zorkbot.message_window import MessageWindows
-from zorkbot.radio_state import RadioState, haversine_km, location_is_set
+from zorkbot.radio_state import (
+    RadioState,
+    RadioWriteError,
+    haversine_km,
+    location_is_set,
+)
 
 CHANNEL_SECRET = bytes(range(16))
 
@@ -41,7 +47,7 @@ class FakeMeshCore:
     a mock for every attribute hides exactly that.
     """
 
-    def __init__(self, *, self_info=None, contacts=None, max_channels=3, channel_names=None):
+    def __init__(self, *, self_info=None, contacts=None, max_channels=8, channel_names=None):
         self.self_info = self_info if self_info is not None else dict(_SELF_INFO)
         self.contacts = contacts if contacts is not None else {}
         self.device_queries = 0
@@ -50,7 +56,29 @@ class FakeMeshCore:
         self._channel_names = (
             channel_names if channel_names is not None else {0: "public", 1: "#zork", 2: "#bots"}
         )
+        self._channel_secrets = {idx: CHANNEL_SECRET for idx in self._channel_names}
+        # Writes the radio was asked to make, as (idx, name, secret) with the
+        # secret as the device would end up holding it.
+        self.writes = []
+        # "The device refused": the write is recorded but not applied, which
+        # is what the read-back is there to catch.
+        self.reject_writes = False
+        # "The OK was lost": the write lands, but the call reports a failure.
+        # The firmware saves before it acknowledges, so this really happens.
+        self.lose_write_ack = False
+        # Serial-link occupancy. Every command yields once, so two callers
+        # that are not holding the same lock will be seen overlapping here.
+        self.in_flight = 0
+        self.max_in_flight = 0
         self.commands = self._Commands(self)
+
+    async def _occupy_link(self):
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(0)
+        finally:
+            self.in_flight -= 1
 
     class _Commands:
         def __init__(self, radio):
@@ -58,6 +86,7 @@ class FakeMeshCore:
 
         async def send_device_query(self):
             radio = self._radio
+            await radio._occupy_link()
             radio.device_queries += 1
             if radio.fail_device_query:
                 raise RuntimeError("radio went away")
@@ -74,15 +103,43 @@ class FakeMeshCore:
             })
 
         async def get_channel(self, idx):
-            name = self._radio._channel_names.get(idx)
-            if name is None:
+            radio = self._radio
+            await radio._occupy_link()
+            name = radio._channel_names.get(idx)
+            if not name:
+                # Every slot exists on the real device; an unconfigured one
+                # answers with an empty name, which is what the sweep skips.
                 return _Event({"channel_idx": idx, "channel_name": ""})
+            secret = radio._channel_secrets.get(idx, CHANNEL_SECRET)
             return _Event({
                 "channel_idx": idx,
                 "channel_name": name,
-                "channel_secret": CHANNEL_SECRET,
-                "channel_hash": f"{idx:02x}",
+                "channel_secret": secret,
+                # Computed by the library's parser, not sent by the device.
+                "channel_hash": sha256(secret).hexdigest()[0:2],
             })
+
+        async def set_channel(self, idx, name, secret=None):
+            """The library's derivation rule, then the firmware's assignment.
+
+            Both halves matter to the tests: the "#" rule and the
+            secret-is-None rule are the two ways a channel ends up with a key
+            anyone can compute.
+            """
+            radio = self._radio
+            await radio._occupy_link()
+            if name.startswith("#") or secret is None:
+                secret = sha256(name.encode("utf-8")).digest()[0:16]
+            if len(secret) != 16:
+                raise ValueError("Channel secret must be exactly 16 bytes")
+            radio.writes.append((idx, name, secret))
+            if radio.reject_writes:
+                return _Event({"reason": "refused"})
+            radio._channel_names[idx] = name
+            radio._channel_secrets[idx] = secret
+            if radio.lose_write_ack:
+                raise RuntimeError("no response from device")
+            return _Event({})
 
     def get_contact_by_key_prefix(self, prefix):
         for key, contact in self.contacts.items():
@@ -126,6 +183,10 @@ def _make_config():
     config.channel = ChannelConfig(index=1, name="#zork")
     config.bots_channel = ChannelConfig(index=2, name="#bots")
     config.bots_enabled = True
+    # Writes on, and unthrottled: the interval guards the radio's flash
+    # against a looping client, and one test sets it back to check that.
+    config.admin_ui.radio_write_enabled = True
+    config.admin_ui.radio_write_min_interval_seconds = 0.0
     return config
 
 
@@ -199,6 +260,20 @@ async def _token(client) -> str:
 async def _get(client, path):
     token = await _token(client)
     return await client.get(path, headers={"Authorization": f"Bearer {token}"})
+
+
+async def _put(client, path, body):
+    token = await _token(client)
+    return await client.put(path, json=body, headers={"Authorization": f"Bearer {token}"})
+
+
+async def _delete(client, path):
+    token = await _token(client)
+    return await client.delete(path, headers={"Authorization": f"Bearer {token}"})
+
+
+def _error(response):
+    return response.json()["detail"]["error"]
 
 
 # ----------------------------------------------------------------------
@@ -591,3 +666,304 @@ def test_radio_state_tolerates_a_radio_with_no_contacts_attribute() -> None:
     state = RadioState(object())
     assert state.contacts() == []
     assert state.connected is False
+
+
+# ----------------------------------------------------------------------
+# Channel writes: the four sharp edges
+#
+# Each of these guards a way the MeshCore channel API produces a channel that
+# looks right and is not. See docs/specs/admin-radio-edit.md.
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_named_channel_without_a_key_is_refused_before_the_radio_is_touched(
+    client,
+) -> None:
+    """The sharpest edge: set_channel derives the key from the name when it is
+    given none, for any name — so 'neighbours' with no key gets a key anyone
+    who can read the name can compute. The assertion that no write was made
+    matters as much as the status."""
+    r = await _put(client, "/api/radio/channels/3", {"name": "neighbours"})
+
+    assert r.status_code == 400
+    assert _error(r) == "secret_required"
+    assert client.radio.writes == []
+
+
+@pytest.mark.asyncio
+async def test_a_public_channel_derives_its_key_and_refuses_one(client) -> None:
+    r = await _put(client, "/api/radio/channels/3", {"name": "#london", "secret": "ab" * 16})
+    assert r.status_code == 400
+    assert _error(r) == "secret_not_used"
+    assert client.radio.writes == []
+
+    r = await _put(client, "/api/radio/channels/3", {"name": "#london"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["key_source"] == "derived"
+    # The name is the key: the hash the radio reports is the hash of it.
+    assert body["hash"] == sha256(sha256(b"#london").digest()[0:16]).hexdigest()[0:2]
+
+
+@pytest.mark.asyncio
+async def test_a_keyed_channel_uses_the_key_it_was_given(client) -> None:
+    r = await _put(
+        client, "/api/radio/channels/3", {"name": "neighbours", "secret": "0f" * 16}
+    )
+
+    assert r.status_code == 200
+    assert r.json()["key_source"] == "provided"
+    assert client.radio.writes == [(3, "neighbours", bytes.fromhex("0f" * 16))]
+
+
+@pytest.mark.asyncio
+async def test_a_name_is_capped_at_the_31_bytes_the_firmware_keeps(client) -> None:
+    """char[32] with a reserved terminator. A 32-byte name loses its last byte
+    silently, and for a '#' channel that breaks it: the key is derived from
+    the untruncated name, so nobody could join by the name the device shows."""
+    ok = await _put(client, "/api/radio/channels/3", {"name": "#" + "a" * 30})
+    assert ok.status_code == 200
+
+    too_long = await _put(client, "/api/radio/channels/4", {"name": "#" + "a" * 31})
+    assert too_long.status_code == 400
+    assert _error(too_long) == "name_too_long"
+
+
+@pytest.mark.asyncio
+async def test_a_name_is_measured_in_bytes_not_characters(client) -> None:
+    # 16 characters, 32 bytes as UTF-8: the client truncates with
+    # encode()[:32], which would also split a codepoint.
+    r = await _put(client, "/api/radio/channels/3", {"name": "é" * 16})
+    assert r.status_code == 400
+    assert _error(r) == "name_too_long"
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_slot_leaves_a_key_nobody_can_guess(client) -> None:
+    """There is no delete: the slot keeps whatever key the clearing write puts
+    in it, and the radio still matches inbound packets against every slot's
+    hash. A fixed key would leave the slot listening on a known channel."""
+    fixed = [sha256(b"").digest()[0:16], bytes(16)]
+
+    first = await _delete(client, "/api/radio/channels/0")
+    assert first.status_code == 200
+    assert first.json() == {"idx": 0, "cleared": True}
+
+    client.radio._channel_names[0] = "public"  # put it back so we can clear again
+    client.bot.radio_state._fetched_at = 0.0
+    await _delete(client, "/api/radio/channels/0")
+
+    cleared = [w for w in client.radio.writes if w[0] == 0]
+    assert [w[1] for w in cleared] == ["", ""]
+    assert cleared[0][2] != cleared[1][2], "the clearing key must be random"
+    for _, _, secret in cleared:
+        assert secret not in fixed
+
+
+# ----------------------------------------------------------------------
+# Channel writes: ownership and slots
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_the_bots_own_channels_are_not_editable(client) -> None:
+    """apply_settings() rewrites these from config on every startup, so a
+    console write here would appear to work and then silently revert."""
+    body = (await _get(client, "/api/radio/channels")).json()
+    by_idx = {c["idx"]: c for c in body["channels"]}
+    assert by_idx[1]["editable"] is False
+    assert by_idx[2]["editable"] is False
+    assert by_idx[0]["editable"] is True
+
+    for response in [
+        await _put(client, "/api/radio/channels/1", {"name": "#elsewhere"}),
+        await _delete(client, "/api/radio/channels/1"),
+    ]:
+        assert response.status_code == 409
+        assert _error(response) == "channel_is_served"
+        assert "zorkbot.toml" in response.json()["detail"]["error_description"]
+    assert client.radio.writes == []
+
+
+@pytest.mark.asyncio
+async def test_an_occupied_slot_needs_an_explicit_replace(client) -> None:
+    occupied = await _put(client, "/api/radio/channels/0", {"name": "#other"})
+    assert occupied.status_code == 409
+    assert _error(occupied) == "slot_occupied"
+    assert client.radio.writes == []
+
+    replaced = await _put(
+        client, "/api/radio/channels/0", {"name": "#other", "replace": True}
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()["name"] == "#other"
+
+
+@pytest.mark.asyncio
+async def test_free_slots_track_what_is_configured(client) -> None:
+    body = (await _get(client, "/api/radio/channels")).json()
+    assert body["free_slots"] == [3, 4, 5, 6, 7]
+
+    await _put(client, "/api/radio/channels/3", {"name": "#london"})
+    body = (await _get(client, "/api/radio/channels")).json()
+    assert body["free_slots"] == [4, 5, 6, 7]
+    assert 3 in {c["idx"] for c in body["channels"]}
+
+    await _delete(client, "/api/radio/channels/3")
+    body = (await _get(client, "/api/radio/channels")).json()
+    assert body["free_slots"] == [3, 4, 5, 6, 7]
+    assert 3 not in {c["idx"] for c in body["channels"]}
+
+
+@pytest.mark.asyncio
+async def test_a_slot_the_radio_does_not_have_is_refused(client) -> None:
+    r = await _put(client, "/api/radio/channels/8", {"name": "#london"})
+    assert r.status_code == 404
+    assert _error(r) == "unknown_channel_slot"
+
+
+@pytest.mark.asyncio
+async def test_writes_are_refused_when_the_radio_reports_no_slot_count(client) -> None:
+    """Without max_channels there is no telling a free slot from one the
+    firmware does not have, and probing for the edge with writes is not an
+    option the way it is with reads."""
+    client.radio._max_channels = None
+    client.bot.radio_state._fetched_at = 0.0
+
+    r = await _put(client, "/api/radio/channels/3", {"name": "#london"})
+    assert r.status_code == 503
+    assert _error(r) == "radio_unavailable"
+    assert (await _get(client, "/api/radio/channels")).json()["free_slots"] == []
+
+
+@pytest.mark.asyncio
+async def test_clearing_an_empty_slot_writes_nothing(client) -> None:
+    r = await _delete(client, "/api/radio/channels/5")
+    assert r.status_code == 200
+    assert r.json() == {"idx": 5, "cleared": True}
+    # Every accepted write rewrites the radio's channel file to flash.
+    assert client.radio.writes == []
+
+
+# ----------------------------------------------------------------------
+# Channel writes: discipline
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_write_refreshes_the_cache_without_waiting_out_the_ttl(client) -> None:
+    client.bot.radio_state.cache_seconds = 3600
+    await _get(client, "/api/radio/channels")
+
+    await _put(client, "/api/radio/channels/3", {"name": "#london"})
+
+    listed = (await _get(client, "/api/radio/channels")).json()["channels"]
+    assert {c["idx"]: c["name"] for c in listed}[3] == "#london"
+
+
+@pytest.mark.asyncio
+async def test_a_lost_acknowledgement_is_not_reported_as_a_failure(client) -> None:
+    """The firmware saves and then acknowledges, so a write whose OK never
+    arrives has still landed. Telling the operator it failed while the radio
+    shows it applied is the worst thing a control surface can do."""
+    client.radio.lose_write_ack = True
+
+    r = await _put(client, "/api/radio/channels/3", {"name": "#london"})
+
+    assert r.status_code == 200
+    assert r.json()["name"] == "#london"
+
+
+@pytest.mark.asyncio
+async def test_a_write_the_radio_did_not_take_is_a_failure(client) -> None:
+    client.radio.reject_writes = True
+
+    r = await _put(client, "/api/radio/channels/3", {"name": "#london"})
+
+    assert r.status_code == 502
+    assert _error(r) == "radio_write_failed"
+
+
+@pytest.mark.asyncio
+async def test_writes_are_rate_limited_to_spare_the_radios_flash(client) -> None:
+    client.bot.radio_state.write_min_interval = 60.0
+
+    first = await _put(client, "/api/radio/channels/3", {"name": "#london"})
+    second = await _put(client, "/api/radio/channels/4", {"name": "#paris"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert _error(second) == "write_too_frequent"
+
+
+@pytest.mark.asyncio
+async def test_writes_are_off_unless_the_operator_turns_them_on(client) -> None:
+    client.bot.radio_state.write_enabled = False
+
+    assert (await _get(client, "/api/radio")).json()["writes"] == {"enabled": False}
+
+    listed = (await _get(client, "/api/radio/channels")).json()["channels"]
+    assert all(c["editable"] is False for c in listed)
+
+    for response in [
+        await _put(client, "/api/radio/channels/3", {"name": "#london"}),
+        await _delete(client, "/api/radio/channels/0"),
+    ]:
+        assert response.status_code == 403
+        assert _error(response) == "writes_disabled"
+    assert client.radio.writes == []
+
+
+@pytest.mark.asyncio
+async def test_a_written_key_comes_back_from_no_route_and_no_log(client, caplog) -> None:
+    """The read path's leak was the CHANNEL_INFO payload; the write path's
+    would be the request itself, which is the only place a key is typed."""
+    written = "3c" * 16
+    with caplog.at_level("DEBUG"):
+        created = await _put(
+            client, "/api/radio/channels/3", {"name": "neighbours", "secret": written}
+        )
+    assert created.status_code == 200
+
+    token = await _token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    for path in ["/api/radio", "/api/radio/channels", "/api/radio/contacts"]:
+        assert written not in (await client.get(path, headers=headers)).text, path
+    assert written not in created.text
+    assert written not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_write_and_a_sweep_do_not_interleave_on_the_link() -> None:
+    """Both take the same lock. Sharing the serial link with a sweep would
+    cross a command with someone else's response.
+
+    Driven at RadioState rather than through the API: the point is what the
+    two coroutines do to the link, and the fake's commands yield so that an
+    unlocked write would be caught overlapping a sweep."""
+    radio = FakeMeshCore()
+    state = RadioState(radio, cache_seconds=0.0, write_min_interval=0.0)
+
+    await asyncio.gather(
+        state.set_channel(3, "#london", None),
+        state.channels(),
+        state.channels(),
+    )
+
+    assert radio.writes == [(3, "#london", sha256(b"#london").digest()[0:16])]
+    assert radio.max_in_flight == 1
+
+
+@pytest.mark.asyncio
+async def test_writes_against_the_simulate_stub_report_no_radio() -> None:
+    config = _make_config()
+    game = GameClient(config.game_url)
+    bot = ZorkBot(config, game, Advertiser(), _StubMeshCore())
+    state = bot.radio_state
+
+    with pytest.raises(RadioWriteError) as put_error:
+        await state.set_channel(3, "#london", None)
+    with pytest.raises(RadioWriteError) as clear_error:
+        await state.clear_channel(0)
+
+    assert put_error.value.code == "radio_unavailable"
+    assert clear_error.value.code == "radio_unavailable"
+    await game.close()

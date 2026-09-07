@@ -1,7 +1,7 @@
 # Admin UI: radio, contacts and channels
 
 **Status:** Implemented on `radio-admin-view`
-**Related:** [admin-web-ui.md](admin-web-ui.md) (the console this extends), [dm-ack-retry.md](dm-ack-retry.md) (RF send serialization), [dm-sessions.md](dm-sessions.md)
+**Related:** [admin-web-ui.md](admin-web-ui.md) (the console this extends), [admin-radio-edit.md](admin-radio-edit.md) (the first writes, built on this view), [dm-ack-retry.md](dm-ack-retry.md) (RF send serialization), [dm-sessions.md](dm-sessions.md)
 
 A **Radio** view in the admin console exposing the state of the attached MeshCore node: device and
 RF settings, the contact table, the configured channels, and a short window of recent message
@@ -36,7 +36,8 @@ lives](admin-web-ui.md#where-the-backend-lives)). The radio's state is in the sa
 
 ## Non-goals (this phase)
 
-- **Changing anything on the radio.** Every endpoint here is a `GET`. See [Future
+- **Changing anything on the radio.** Every endpoint here is a `GET`. Channel writes are
+  specified separately in [admin-radio-edit.md](admin-radio-edit.md); the rest remain [future
   work](#future-work).
 - Persisted message history. Message windows are in-memory and reset on restart — see [Message
   history](#message-history-the-one-real-decision).
@@ -672,7 +673,7 @@ additive.
 |-----------|------|---------------------|
 | Update RF settings | `set_radio(freq, bw, sf, cr)`, `set_tx_power` | **Can strand the node.** Wrong frequency and it is off the mesh until physically reached. Confirmation step, and a plain statement of what is about to change. |
 | Rename node / set location | `set_name`, `set_coords` | Cheap and reversible. The natural first write. |
-| Add / remove channel | `set_channel(idx, name, secret)` | Takes the **secret** — a write-only field the API must never read back. |
+| Add / remove channel | `set_channel(idx, name, secret)` | Takes the **secret** — a write-only field the API must never read back. **Specified in [admin-radio-edit.md](admin-radio-edit.md)**, which also establishes the write plumbing the rest of this table lands on. |
 | Remove contact | `remove_contact` | Irreversible without a re-advert. Confirm. |
 | Send advert | `send_advert(flood=)` | **RF.** Must go through `_send_with_spacing`, and should respect `Advertiser`'s cooldown rather than bypassing it — an admin button that floods on every click is a bad neighbour on a shared band. |
 | Set / clear contact path | `change_contact_path`, `reset_path` | Interacts with the ACK retry path, which already resets paths on repeated failure ([dm-ack-retry.md](dm-ack-retry.md)). A manual override needs to not fight that logic. |

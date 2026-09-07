@@ -23,3 +23,4 @@ Specs should cover scope, API/behavior, files touched, and how to verify the wor
 | [admin-web-ui.md](admin-web-ui.md) | Administrative web UI (LAN console, OAuth2 API, event log) |
 | [dm-ack-retry.md](dm-ack-retry.md) | DM delivery ACKs and bounded retry (proposed) |
 | [admin-radio-view.md](admin-radio-view.md) | Admin UI: radio, contacts and channels (proposed) |
+| [admin-radio-edit.md](admin-radio-edit.md) | Admin UI: editing radio settings — add/remove channels (proposed) |

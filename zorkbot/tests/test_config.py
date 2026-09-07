@@ -223,3 +223,35 @@ def test_admin_ui_log_keys_are_not_flagged_as_unknown(tmp_path: Path, caplog) ->
     with caplog.at_level(logging.WARNING):
         load_config(config_path)
     assert "unknown key" not in caplog.text
+
+
+def test_admin_ui_radio_write_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text(
+        """
+[admin_ui]
+enabled = true
+radio_write_enabled = true
+radio_write_min_interval_seconds = 5
+""".strip()
+    )
+    config = load_config(config_path)
+    assert config.admin_ui.radio_write_enabled is True
+    assert config.admin_ui.radio_write_min_interval_seconds == 5.0
+
+
+def test_radio_writes_are_off_by_default() -> None:
+    """An upgrade should not silently hand a deployment an endpoint that
+    changes device state."""
+    assert BotConfig().admin_ui.radio_write_enabled is False
+    assert BotConfig().admin_ui.radio_write_min_interval_seconds == 2.0
+
+
+def test_admin_ui_radio_write_keys_are_not_flagged_as_unknown(tmp_path: Path, caplog) -> None:
+    config_path = tmp_path / "zorkbot.toml"
+    config_path.write_text(
+        "[admin_ui]\nradio_write_enabled = true\nradio_write_min_interval_seconds = 1\n"
+    )
+    with caplog.at_level(logging.WARNING):
+        load_config(config_path)
+    assert "unknown key" not in caplog.text

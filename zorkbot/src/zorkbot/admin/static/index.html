@@ -155,6 +155,26 @@
           <tbody></tbody>
         </table>
 
+        <div id="channel-add" hidden>
+          <button type="button" id="channel-add-show" class="ghost">Add channel</button>
+          <form id="channel-add-form" class="channel-form" hidden autocomplete="off">
+            <label>Slot
+              <select id="channel-add-slot"></select>
+            </label>
+            <label>Name
+              <input type="text" id="channel-add-name" maxlength="31" placeholder="#london">
+            </label>
+            <label id="channel-add-key-label">Key
+              <input type="text" id="channel-add-key" autocomplete="off" spellcheck="false"
+                     placeholder="32 hex characters">
+            </label>
+            <button type="submit">Add</button>
+            <button type="button" id="channel-add-cancel" class="ghost">Cancel</button>
+            <p id="channel-add-note" class="form-note"></p>
+            <p id="channel-add-error" class="form-error"></p>
+          </form>
+        </div>
+
         <h3 class="section-head">Contacts <span id="contacts-count" class="mono"></span></h3>
         <div class="filters">
           <button type="button" id="contacts-show" class="ghost">Show contacts</button>

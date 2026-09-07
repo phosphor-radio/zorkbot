@@ -87,6 +87,8 @@ class ZorkBot:
             meshcore,
             cache_seconds=config.admin_ui.radio_cache_seconds,
             served_channels=served,
+            write_enabled=config.admin_ui.radio_write_enabled,
+            write_min_interval=config.admin_ui.radio_write_min_interval_seconds,
         )
 
         # Per-player asyncio queues: pubkey_prefix → asyncio.Queue
