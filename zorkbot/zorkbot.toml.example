@@ -83,3 +83,8 @@ pubkeys = ["your-pubkey-prefix"]
 # max_live_streams = 4
 # log_buffer_lines = 500            # process log records kept for the Logs view
 # max_log_streams = 2
+# radio_cache_seconds = 30          # TTL for the Radio view's device query + channel sweep
+# radio_message_window = 20         # recent messages kept per contact and per served channel
+#                                   #   (in memory only, never persisted; 0 disables capture)
+# radio_message_contacts = 50       # contacts tracked before LRU eviction; the served
+#                                   #   channels are reserved and not counted against it

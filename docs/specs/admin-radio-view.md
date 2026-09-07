@@ -1,6 +1,6 @@
 # Admin UI: radio, contacts and channels
 
-**Status:** Proposed
+**Status:** Implemented on `radio-admin-view`
 **Related:** [admin-web-ui.md](admin-web-ui.md) (the console this extends), [dm-ack-retry.md](dm-ack-retry.md) (RF send serialization), [dm-sessions.md](dm-sessions.md)
 
 A **Radio** view in the admin console exposing the state of the attached MeshCore node: device and
