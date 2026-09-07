@@ -21,7 +21,7 @@ REPLY_DELAY_JITTER_SECONDS = 5.0
 
 def build_reply_text(game_channel_name: str) -> str:
     return (
-        "zorkbot - private Zork I game sessions over mesh DMs.\n"
+        "Private Zork I game sessions over mesh DMs.\n"
         f"Join {game_channel_name} and send !help for commands."
     )
 
