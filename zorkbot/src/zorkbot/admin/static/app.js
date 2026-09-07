@@ -18,6 +18,7 @@ const state = {
   logReconnect: null,
   logRecords: [],
   logLastSeq: 0,
+  uptimeTimer: null,
 };
 
 function setTokens(resp) {
@@ -225,6 +226,7 @@ document.getElementById("settings-password-form").addEventListener("submit", asy
 document.getElementById("logout-btn").addEventListener("click", async () => {
   stopLive();
   stopLogStream();
+  stopUptimePolling();
   resetLogView();
   if (state.refreshToken) {
     try {
@@ -257,9 +259,14 @@ for (const btn of document.querySelectorAll(".tab")) {
     if (btn.dataset.tab === "players") loadPlayers();
     // Log streams are capped server-side (max_log_streams, default 2), so the
     // stream is dropped the moment the tab loses focus rather than held open
-    // for a view nobody is looking at.
-    if (btn.dataset.tab === "logs") startLogStream();
-    else stopLogStream();
+    // for a view nobody is looking at. The uptime poll goes with it.
+    if (btn.dataset.tab === "logs") {
+      startLogStream();
+      startUptimePolling();
+    } else {
+      stopLogStream();
+      stopUptimePolling();
+    }
   });
 }
 document.querySelector(".tab[data-tab='live']").classList.add("active");
@@ -593,6 +600,41 @@ for (const input of document.querySelectorAll("input[name='rx-transport'], input
 }
 
 // ---------------------------------------------------------------------
+// Uptime. The string comes formatted from /api/status so it reads exactly
+// as the !uptime channel command answers; the SPA never reformats it.
+// ---------------------------------------------------------------------
+
+// Coarse on purpose: /status also health-checks the game service, and the
+// format is minute-granular above an hour, so a tighter poll would buy
+// nothing but load on the Pi.
+const UPTIME_POLL_MS = 15000;
+
+const uptimeEl = document.getElementById("log-uptime");
+
+async function refreshUptime() {
+  try {
+    const resp = await api("/status");
+    const data = await resp.json();
+    uptimeEl.textContent = data.uptime || "\u2014";
+  } catch (e) {
+    // Transient failure — keep the last known value; the next poll retries.
+  }
+}
+
+function startUptimePolling() {
+  refreshUptime();
+  stopUptimePolling();
+  state.uptimeTimer = setInterval(refreshUptime, UPTIME_POLL_MS);
+}
+
+function stopUptimePolling() {
+  if (state.uptimeTimer) {
+    clearInterval(state.uptimeTimer);
+    state.uptimeTimer = null;
+  }
+}
+
+// ---------------------------------------------------------------------
 // Log tail. A live view on the running process, streamed from the same
 // in-memory ring the server replays on connect — no history, no persistence.
 // ---------------------------------------------------------------------
@@ -774,6 +816,7 @@ document.getElementById("log-clear").addEventListener("click", () => {
 function resetLogView() {
   state.logRecords = [];
   state.logLastSeq = 0;
+  uptimeEl.textContent = "\u2014";
   renderLogLines();
 }
 
