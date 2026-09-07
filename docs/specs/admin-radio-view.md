@@ -104,8 +104,9 @@ Local read, no round-trip.
 | Current path | `out_path` | Hex hop hashes, `""` when flooding |
 | Out path hash size | `out_path_hash_mode` | Bytes per hop hash is `mode + 1`; `-1` when flooding |
 
-`flags` and `lastmod` are also present and are not surfaced — `flags` has no stable public meaning
-worth rendering, and `lastmod` is a sync watermark rather than an observation.
+`flags` and `lastmod` are also present and are deliberately not surfaced: `flags` carries nothing
+an operator can act on, and `lastmod` is a contact-sync watermark rather than an observation about
+the contact. Neither belongs in the grid.
 
 **The flood sentinel matters.** `reader.py` sets `out_path_hash_mode` and `out_path_len` to `-1`
 together when the wire length byte is `255`. Rendering that as "-1 hops via path (none)" is
@@ -194,6 +195,10 @@ There is no "list channels" command; channels are read one index at a time. `max
 device query bounds the sweep — without it the implementation would have to guess an upper bound
 and probe until the device errors. Indices that return an error or an empty name are omitted (an
 unconfigured slot is not a channel).
+
+Sweeping `0..max_channels` enumerates every configured channel, confirmed against the deployed
+radio. The list is therefore complete rather than best-effort, and the view does not need to warn
+that a channel might exist beyond what it shows.
 
 The result is small (the user's radio has around three) and cached, so the view can always render
 the full list — no pagination, no "load channels" button.
@@ -679,11 +684,3 @@ the log tail is a debugging problem waiting to happen.
 
 Not reserved, and deliberately: nothing here calls `reboot()`, `request_factory_reset()`, or
 `import_private_key()`.
-
-## Open questions
-
-1. **Does the `0..max_channels` sweep enumerate every configured channel?** This bounds the
-   channel list, so an index the firmware holds but does not report would simply be missing from
-   the view. Worth confirming against the real device before implementation.
-2. **Should the contact grid show `flags`?** Omitted above for lack of a stable public meaning. If
-   the firmware documents it, it belongs in the grid rather than in a drill-in.
