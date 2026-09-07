@@ -8,6 +8,7 @@ from importlib.metadata import PackageNotFoundError, version
 from fastapi import APIRouter, Depends, Request
 
 from zorkbot.admin.deps import get_ctx, require_scope
+from zorkbot.commands.uptime import format_uptime
 
 router = APIRouter(tags=["meta"])
 
@@ -28,10 +29,15 @@ async def status(request: Request, _entry: dict = Depends(require_scope())) -> d
     except Exception:
         game_reachable = False
 
+    uptime_seconds = int(time.monotonic() - bot._started_at)
+
     return {
         "bot_run_id": ctx.sink.bot_run_id,
         "version": _version(),
-        "uptime_seconds": int(time.monotonic() - bot._started_at),
+        "uptime_seconds": uptime_seconds,
+        # Rendered here rather than in the SPA so the admin UI and the
+        # !uptime channel command can never drift apart on the format.
+        "uptime": format_uptime(uptime_seconds),
         "active_sessions": len(bot.session_state.all_sessions()),
         "send_queue_depth": bot.send_queue_depth,
         "startup_flushed_messages": bot.startup_flushed_messages,

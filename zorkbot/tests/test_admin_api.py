@@ -18,6 +18,7 @@ from zorkbot.admin.logbus import LogBus
 from zorkbot.admin.store import Store
 from zorkbot.advertiser import Advertiser
 from zorkbot.bot import ZorkBot
+from zorkbot.commands.uptime import format_uptime
 from zorkbot.config import BotConfig
 from zorkbot.game_client import GameClient
 
@@ -189,6 +190,18 @@ async def test_status_endpoint(client) -> None:
     # No runner drained a radio for this bot, so the field is null rather
     # than 0 — "never ran" is not the same as "flushed nothing".
     assert body["startup_flushed_messages"] is None
+
+
+@pytest.mark.asyncio
+async def test_status_uptime_matches_the_channel_command(client) -> None:
+    """The admin UI renders this string verbatim, so it has to be the same
+    text !uptime answers with — not a second formatter that drifts."""
+    token = await _admin_token(client)
+    r = await client.get("/api/status", headers={"Authorization": f"Bearer {token}"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["uptime"] == format_uptime(body["uptime_seconds"])
 
 
 @pytest.mark.asyncio

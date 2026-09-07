@@ -435,7 +435,7 @@ already applies.
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| `GET` | `/api/status` | admin | Bot uptime, version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count, count of offline-backlog messages discarded at startup |
+| `GET` | `/api/status` | admin | Bot uptime (`uptime_seconds`, plus `uptime` pre-formatted by the same `format_uptime` the `!uptime` command uses), version, `bot_run_id`, active session count, send-queue depth, game-service reachability, event-queue depth and drop count, count of offline-backlog messages discarded at startup |
 | `GET` | `/health` | none | Liveness only — `{"status":"ok"}`, no data |
 | `GET` | `/api/logs/stream` | admin | SSE tail of the process log, `level=DEBUG\|INFO\|WARNING\|ERROR\|CRITICAL` |
 
@@ -566,7 +566,7 @@ Views:
 | **History** | Session start/end table with date-range and player filters, cursor pagination. |
 | **Charts** | Session starts/ends; messages received (dm / channel / both); messages sent (dm / channel / both). Shared range picker (1 h / 24 h / 7 d / 30 d / custom) driving `bucket` automatically. |
 | **Players** | Sortable stats table; row opens the per-player detail. |
-| **Logs** | Live tail of the process log. Server-side level filter (reconnects), client-side substring filter, follow-tail toggle that releases when you scroll up, and clear. |
+| **Logs** | Bot uptime at the top, polled from `/api/status` every 15 s while the tab is open. Below it, a live tail of the process log: server-side level filter (reconnects), client-side substring filter, follow-tail toggle that releases when you scroll up, and clear. |
 | **Settings** | Change password. Shown modally and exclusively on first login. |
 
 Token handling in the browser: the access token is held in a JS variable (memory only); the refresh

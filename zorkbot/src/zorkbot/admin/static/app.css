@@ -207,6 +207,18 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; color: var(--text-di
   word-break: break-word;
 }
 
+/* Single-fact line above a panel — laid out as a row so further fields can
+   join it without becoming a table. */
+.stat-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.stat-line .stat-label { color: var(--text-dim); }
+.stat-line .stat-value { font-family: var(--mono); color: var(--text); }
+
 #log-stream {
   background: var(--bg-panel);
   border: 1px solid var(--border);
