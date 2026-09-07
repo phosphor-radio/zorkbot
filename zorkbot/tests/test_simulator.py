@@ -161,6 +161,7 @@ async def test_simulator_shows_the_delayed_bots_roll_call_reply() -> None:
 
     import zorkbot.commands.bots as bots_module
     from zorkbot.channels import ChannelConfig
+    from zorkbot.commands.bots import build_reply_text
 
     config = BotConfig(game_url="http://game:8080")
     config.bots_enabled = True
@@ -177,5 +178,11 @@ async def test_simulator_shows_the_delayed_bots_roll_call_reply() -> None:
         ):
             lines = await sim.handle_line("!bots")
 
-    assert any("zorkbot" in line for line in lines), lines
-    assert any(config.channel.name in line for line in lines), lines
+    # Against build_reply_text rather than a substring of the copy: the
+    # wording is not what this test is about, and hardcoding it here is what
+    # left this assertion behind when the reply text last changed. The
+    # simulator prefixes and indents continuation lines, so each line of the
+    # reply is matched within the rendered block rather than line-for-line.
+    rendered = "\n".join(lines)
+    for part in build_reply_text(config.channel.name).splitlines():
+        assert part in rendered, lines
