@@ -102,6 +102,12 @@ class Simulator:
             else:
                 await self.bot.dispatch_channel(message, reply)
 
+        # A handler may answer from a background task rather than by
+        # returning: the !bots roll call waits 5-10s first so that mesh bots
+        # don't all transmit at once. drain() waits for those, so say why the
+        # prompt is holding instead of looking hung.
+        if self.bot.has_pending_replies():
+            print("(waiting for a delayed reply…)", flush=True)
         await self.bot.drain()
 
         # Merge channel replies and any DMs that were sent during handling.

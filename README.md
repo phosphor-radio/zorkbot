@@ -299,6 +299,13 @@ When enabled, `!bots` on the configured channel replies after a 5–10s randomiz
 multiple mesh bots answering the same roll-call don't collide on the air) with a short blurb
 identifying the bot and pointing to the game channel and `!help`.
 
+The message has to *be* the command, not mention it: `!bots` (optionally addressed as
+`zorkbot: !bots`, and case-insensitive) is answered, while `Use the !bots command to find
+bots` and `!bots?` are not — like every other `!command`, it is only recognized at the start
+of the message, with nothing appended to the word itself. Roll calls are sent as a bare
+`!bots`, and a bot that answered every passing mention of the word would spend airtime on
+conversation about it.
+
 ### In a DM session
 
 | Input | Action |
