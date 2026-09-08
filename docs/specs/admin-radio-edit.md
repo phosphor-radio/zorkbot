@@ -441,10 +441,11 @@ The Channels table grows an actions column and an Add form; nothing else in the 
   required. The client mirrors the server rules so the operator learns them by using the form, not
   by collecting `400`s — but the server enforces them regardless, since the form is not the only
   caller.
-- **Remove** — on `editable` rows only, behind a confirmation naming the channel and stating that
-  re-adding it needs the key again, which the console cannot supply. That sentence is the whole
-  point of the confirmation: removal is cheap on the radio and expensive for an operator who did
-  not write the key down.
+- **Remove** — on `editable` rows only, behind a confirmation naming the channel. For a keyed
+  channel the confirmation also states that re-adding it needs the key again, which the console
+  cannot supply: removal is cheap on the radio and expensive for an operator who did not write the
+  key down. A `#` channel's key is its name, so re-adding it costs nothing but typing, and that
+  sentence is left off rather than teaching the operator to skim it.
 - **Served rows** show `config` instead of an action, with the owning config key in the title
   attribute. No disabled button — the row is not a thing this console edits.
 - **Key input** is `autocomplete="off"`, never written to `state`, and cleared on submit and on

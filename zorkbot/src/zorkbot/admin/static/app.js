@@ -856,11 +856,13 @@ channelFormEl.addEventListener("submit", async (event) => {
 });
 
 async function removeChannel(idx, name) {
-  const ok = window.confirm(
-    `Remove ${name} from slot ${idx}?\n\n` +
-      "The console cannot show you the key again, so re-adding it means having " +
-      "your own copy."
-  );
+  // The warning is only true of a keyed channel. A "#" channel's key is
+  // derived from its name, so re-adding it costs nothing but typing.
+  const warning = name.startsWith("#")
+    ? ""
+    : "\n\nThe console cannot show you the key again, so re-adding it means " +
+      "having your own copy.";
+  const ok = window.confirm(`Remove ${name} from slot ${idx}?${warning}`);
   if (!ok) return;
 
   const resp = await api(`/radio/channels/${encodeURIComponent(idx)}`, { method: "DELETE" });
