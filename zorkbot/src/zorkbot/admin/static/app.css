@@ -226,6 +226,52 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; color: var(--text-di
 .radio-panel .radio-line:last-child { margin-bottom: 0; }
 .radio-stale { margin: 8px 0 0; font-size: 12px; color: var(--warning); }
 
+#channel-add { margin-top: 10px; }
+.channel-form {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+/* An explicit display beats the UA's [hidden] rule, so both the form and
+   the key field it hides need this said out loud. */
+.channel-form[hidden], .channel-form [hidden] { display: none; }
+.channel-form label { display: flex; align-items: center; gap: 6px; }
+.channel-form input[type="text"], .channel-form select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.channel-form input#channel-add-key { font-family: var(--mono); width: 21em; }
+.channel-form button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+/* The notes take the whole row: both say something the operator needs to
+   read before submitting, not beside the field. */
+.form-note, .form-error { flex-basis: 100%; margin: 0; font-size: 12px; }
+.form-note { color: var(--text-dim); }
+.form-error { color: var(--danger); }
+.form-error:empty, .form-note:empty { display: none; }
+
+/* A channel row can carry both a drill-in and an ownership note. */
+td.row-actions { white-space: nowrap; }
+td.row-actions > * + * { margin-left: 12px; }
+
 #radio-messages {
   margin-top: 16px;
   background: var(--bg-panel);

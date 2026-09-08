@@ -20,6 +20,7 @@ _ADMIN_UI_KEYS = frozenset({
     "live_buffer_events", "max_live_streams",
     "log_buffer_lines", "max_log_streams",
     "radio_cache_seconds", "radio_message_window", "radio_message_contacts",
+    "radio_write_enabled", "radio_write_min_interval_seconds",
 })
 _CHANNEL_KEYS = frozenset({"index", "name", "secret"})
 _ROOT_OPTIONAL_KEYS = frozenset({
@@ -80,6 +81,14 @@ class AdminUIConfig:
     # channel cannot flush the contacts playing on it, or vice versa.
     radio_message_window: int = 20
     radio_message_contacts: int = 50
+    # Channel writes from the Radio view. Off by default: an upgrade should
+    # not silently hand an existing deployment an endpoint that changes
+    # device state. The minimum interval is not there to pace an operator —
+    # the firmware rewrites its whole channel file to flash on every accepted
+    # write, so a looping client is a flash-wear problem on hardware that
+    # cannot be reflashed from the console.
+    radio_write_enabled: bool = False
+    radio_write_min_interval_seconds: float = 2.0
 
 
 @dataclass
@@ -302,6 +311,12 @@ def _apply_toml(config: BotConfig, data: dict) -> None:
             ui.radio_message_window = int(admin_ui["radio_message_window"])
         if "radio_message_contacts" in admin_ui:
             ui.radio_message_contacts = int(admin_ui["radio_message_contacts"])
+        if "radio_write_enabled" in admin_ui:
+            ui.radio_write_enabled = bool(admin_ui["radio_write_enabled"])
+        if "radio_write_min_interval_seconds" in admin_ui:
+            ui.radio_write_min_interval_seconds = float(
+                admin_ui["radio_write_min_interval_seconds"]
+            )
 
 
 def _warn_misplaced_section_keys(section: str, values: dict, allowed: frozenset[str]) -> None:

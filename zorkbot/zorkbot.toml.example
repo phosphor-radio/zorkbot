@@ -88,3 +88,9 @@ pubkeys = ["your-pubkey-prefix"]
 #                                   #   (in memory only, never persisted; 0 disables capture)
 # radio_message_contacts = 50       # contacts tracked before LRU eviction; the served
 #                                   #   channels are reserved and not counted against it
+# radio_write_enabled = false       # let the Radio view add and remove channels. The bot's
+#                                   #   own channels stay owned by [channel]/[bots_channel]
+#                                   #   below and are not editable from the console.
+# radio_write_min_interval_seconds = 2
+#                                   # minimum gap between accepted radio writes; the radio
+#                                   #   rewrites its channel file to flash on every one
