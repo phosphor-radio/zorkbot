@@ -84,6 +84,75 @@ async def test_channel_msg_unknown_sender_has_no_pubkey_prefix():
     assert message.pubkey_prefix is None
 
 
+@pytest.mark.asyncio
+async def test_channel_rx_counted_only_when_the_bot_answers():
+    """#zork and #bots carry conversation the bot has no part in. Counting
+    all of it as "messages received" reads as bot load that never existed —
+    only what the bot actually answered belongs in the stat."""
+    meshcore = _make_meshcore(contact=None)
+    runner = _make_runner(meshcore)
+    runner.bot.dispatch_channel = AsyncMock(return_value=False)
+
+    event = Event(
+        EventType.CHANNEL_MSG_RECV,
+        {"channel_idx": 1, "text": "Stranger: anyone around?"},
+    )
+    await runner._on_channel_msg(event)
+
+    runner.bot.event_sink.message_rx.assert_not_called()
+    # The radio view still shows it — that window is what is on the air.
+    runner.bot.message_windows.record_rx.assert_called_once()
+
+    runner.bot.dispatch_channel = AsyncMock(return_value=True)
+    await runner._on_channel_msg(
+        Event(EventType.CHANNEL_MSG_RECV, {"channel_idx": 1, "text": "Alice: !start"})
+    )
+
+    runner.bot.event_sink.message_rx.assert_called_once()
+    kwargs = runner.bot.event_sink.message_rx.call_args.kwargs
+    assert kwargs["transport"] == "channel"
+    assert kwargs["channel_idx"] == 1
+    assert kwargs["chars"] == len("!start")
+
+
+@pytest.mark.asyncio
+async def test_bots_channel_rx_counted_only_when_the_bot_answers():
+    meshcore = _make_meshcore(contact=None)
+    runner = _make_runner(meshcore)
+    runner.bot.dispatch_bots_channel = AsyncMock(return_value=False)
+
+    event = Event(EventType.CHANNEL_MSG_RECV, {"channel_idx": 2, "text": "Other: !bots"})
+    await runner._on_bots_channel_msg(event)
+
+    runner.bot.event_sink.message_rx.assert_not_called()
+
+    runner.bot.dispatch_bots_channel = AsyncMock(return_value=True)
+    await runner._on_bots_channel_msg(event)
+
+    runner.bot.event_sink.message_rx.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dm_rx_always_counted():
+    """A DM is addressed to the bot even when it answers nothing, so every
+    one counts — the gate is for shared channels only."""
+    meshcore = _make_meshcore(contact=None)
+    runner = _make_runner(meshcore)
+    runner.bot.dispatch_dm = AsyncMock(return_value=False)
+
+    event = Event(
+        EventType.CONTACT_MSG_RECV,
+        {"pubkey_prefix": PUBKEY_PREFIX, "text": "hello?"},
+    )
+    await runner._on_dm_msg(event)
+
+    runner.bot.event_sink.message_rx.assert_called_once()
+    kwargs = runner.bot.event_sink.message_rx.call_args.kwargs
+    assert kwargs["transport"] == "dm"
+    assert kwargs["channel_idx"] is None
+    assert kwargs["pubkey_prefix"] == PUBKEY_PREFIX
+
+
 def _make_settings_meshcore(current_autoadd_config: int):
     mc = MagicMock()
     mc.commands.set_name = AsyncMock(return_value=Event(EventType.OK, {}))

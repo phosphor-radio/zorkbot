@@ -299,7 +299,7 @@ class MeshCoreRunner:
             (message.pubkey_prefix or "?")[:8],
             message.text,
         )
-        self._record_rx(message)
+        self._observe_rx(message)
         self._note_channel_rx()
 
         async def reply(text: str) -> bool:
@@ -308,7 +308,8 @@ class MeshCoreRunner:
             await self._send_chan_msg(message.channel_idx, text)
             return True
 
-        await self.bot.dispatch_channel(message, reply)
+        if await self.bot.dispatch_channel(message, reply):
+            self._count_rx(message)
 
     async def _on_bots_channel_msg(self, event: Event) -> None:
         message = self._build_channel_message(event.payload)
@@ -318,41 +319,64 @@ class MeshCoreRunner:
             (message.pubkey_prefix or "?")[:8],
             message.text,
         )
-        self._record_rx(message)
+        self._observe_rx(message)
         self._note_channel_rx()
 
         async def reply(text: str) -> bool:
             await self._send_chan_msg(message.channel_idx, text)
             return True
 
-        await self.bot.dispatch_bots_channel(message, reply)
+        if await self.bot.dispatch_bots_channel(message, reply):
+            self._count_rx(message)
 
     def _note_channel_rx(self) -> None:
         self._last_channel_rx_at = asyncio.get_running_loop().time()
 
-    def _record_rx(self, message: IncomingMessage) -> None:
+    def _observe_rx(self, message: IncomingMessage) -> None:
+        """Note a message the radio heard, whether or not it was for the bot.
+
+        Everything here describes what is on the air: who is out there, and
+        what the admin radio view shows in its recent-message windows. A
+        channel carries other people's conversation too, and that is exactly
+        what those windows are meant to show.
+        """
         if message.pubkey_prefix:
             self.bot.event_sink.player_seen(
                 pubkey_prefix=message.pubkey_prefix, name=message.sender_name
             )
-        transport = "dm" if message.is_dm else "channel"
-        channel_idx = None if message.is_dm else message.channel_idx
-        self.bot.event_sink.message_rx(
-            transport=transport,
-            channel_idx=channel_idx,
-            pubkey_prefix=message.pubkey_prefix,
-            chars=len(message.text),
-        )
-        # Text, for the admin radio view's recent-message windows. The sink
-        # above records that a message happened and how long it was; this is
+        # Text, for the admin radio view's recent-message windows. The stats
+        # sink records that a message happened and how long it was; this is
         # the only thing that keeps what it said, and only in memory.
         self.bot.message_windows.record_rx(
-            transport=transport,
-            channel_idx=channel_idx,
+            transport=self._transport(message),
+            channel_idx=self._channel_idx(message),
             pubkey_prefix=message.pubkey_prefix,
             sender_name=message.sender_name,
             text=message.text,
         )
+
+    def _count_rx(self, message: IncomingMessage) -> None:
+        """Count a message towards the received-messages statistic.
+
+        Every DM is counted — a DM to the bot is addressed to the bot even
+        when it is not a command it knows. Channel traffic is counted only
+        once the bot has answered it, so a busy #zork does not read as bot
+        load it never carried.
+        """
+        self.bot.event_sink.message_rx(
+            transport=self._transport(message),
+            channel_idx=self._channel_idx(message),
+            pubkey_prefix=message.pubkey_prefix,
+            chars=len(message.text),
+        )
+
+    @staticmethod
+    def _transport(message: IncomingMessage) -> str:
+        return "dm" if message.is_dm else "channel"
+
+    @staticmethod
+    def _channel_idx(message: IncomingMessage) -> int | None:
+        return None if message.is_dm else message.channel_idx
 
     async def _on_dm_msg(self, event: Event) -> None:
         payload = event.payload
@@ -381,7 +405,8 @@ class MeshCoreRunner:
             (pubkey_prefix or "?")[:8],
             text,
         )
-        self._record_rx(message)
+        self._observe_rx(message)
+        self._count_rx(message)
 
         async def reply(reply_text: str) -> bool:
             if not pubkey_prefix:

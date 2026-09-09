@@ -249,6 +249,12 @@ uses `time.monotonic()`, which is not a wall clock; see [Bot changes](#bot-chang
 One `messages` row = one RF transmission, not one logical reply. A packetized 3-packet response is
 3 `tx` rows, which is what "messages sent" means on a LoRa mesh.
 
+Not every packet the radio hears is an `rx` row. Every DM is one — a DM is addressed to the bot even
+when it answers nothing — but a channel is shared with conversation the bot has no part in, so
+channel traffic becomes a row only once the bot has answered it. Chatter, commands for other bots,
+and roll calls swallowed by the `!bots` cooldown are heard and not counted; they still reach
+`player_seen` and the radio view's message windows, which are there to show what is on the air.
+
 Player statistics are **derived by query**, not maintained as counters. At this volume (a mesh
 network generates thousands of rows per day at most) the indexed aggregates are instant, and there
 is no drift to debug.
@@ -298,7 +304,7 @@ in-memory `SessionBus` only — it is never written to SQLite in this phase.
 
 | Location | Call |
 |----------|------|
-| `runner.py` `_on_channel_msg` / `_on_bots_channel_msg` | `message_rx(transport="channel", ...)`, `player_seen` |
+| `runner.py` `_on_channel_msg` / `_on_bots_channel_msg` | `player_seen`; `message_rx(transport="channel", ...)` only when `dispatch_*` reports the bot answered |
 | `runner.py` `_on_dm_msg` | `message_rx(transport="dm", ...)`, `player_seen` |
 | `runner.py` `_send_with_spacing` | `message_tx(...)`, including `dropped=1` on the overflow path |
 | `bot.py` `_enqueue` (response still pending) | `command(accepted=0, reject_reason="response_pending")` |
@@ -564,7 +570,7 @@ Views:
 |------|----------|
 | **Live** | Active sessions table (num, player, duration, watcher chips); clicking a row opens the SSE transcript pane. Polls `/api/sessions` every 5 s. |
 | **History** | Session start/end table with date-range and player filters, cursor pagination. |
-| **Charts** | Session starts/ends; messages received (dm / channel / both); messages sent (dm / channel / both). Shared range picker (1 h / 24 h / 7 d / 30 d / custom) driving `bucket` automatically. |
+| **Charts** | Session starts/ends; messages received and messages sent, each drawn as two series — DM and channel — rather than a transport picker, so the split between them is visible at a glance. Shared range picker (1 h / 24 h / 7 d / 30 d / custom) driving `bucket` automatically. |
 | **Players** | Sortable stats table; row opens the per-player detail. |
 | **Logs** | Bot uptime at the top, polled from `/api/status` every 15 s while the tab is open. Below it, a live tail of the process log: server-side level filter (reconnects), client-side substring filter, follow-tail toggle that releases when you scroll up, and clear. |
 | **Settings** | Change password. Shown modally and exclusively on first login. |
