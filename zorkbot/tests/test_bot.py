@@ -1099,6 +1099,58 @@ async def test_channel_message_ignores_other_channels() -> None:
     assert replies == []
 
 
+@pytest.mark.asyncio
+async def test_dispatch_channel_reports_whether_the_bot_answered() -> None:
+    """The runner counts channel traffic as received only when the bot served
+    it, so dispatch has to say which messages those were."""
+    config = BotConfig()
+
+    async def reply(text: str) -> None:
+        pass
+
+    async with GameClient("http://game:8080") as game:
+        bot = _make_bot(config=config, game=game)
+        idx = config.channel.index
+
+        # Conversation between players, and a command on someone else's
+        # channel: overheard, not answered.
+        assert await bot.dispatch_channel(_channel_message("hey all", channel_idx=idx), reply) is False
+        assert await bot.dispatch_channel(_channel_message("!help", channel_idx=99), reply) is False
+
+        # Bare game text, and a command the bot does not know: neither draws
+        # a reply on a channel.
+        assert await bot.dispatch_channel(_channel_message("north", channel_idx=idx), reply) is False
+        assert await bot.dispatch_channel(_channel_message("!inventory", channel_idx=idx), reply) is False
+
+        # A lobby command, and a DM-only command answered with a redirect.
+        assert await bot.dispatch_channel(_channel_message("!help", channel_idx=idx), reply) is True
+        await bot.drain()
+        assert await bot.dispatch_channel(_channel_message("!rules", channel_idx=idx), reply) is True
+        await bot.drain()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_bots_channel_reports_whether_the_bot_answered() -> None:
+    """A roll call the cooldown swallows is answered by nobody, so it is not
+    traffic the bot served either."""
+    config = _bots_enabled_config()
+    idx = config.bots_channel.index
+
+    async def reply(text: str) -> None:
+        pass
+
+    with patch("zorkbot.commands.bots.asyncio.sleep", new=AsyncMock()):
+        async with GameClient("http://game:8080") as game:
+            bot = _make_bot(config=config, game=game)
+            assert await bot.dispatch_bots_channel(_channel_message("hi", channel_idx=idx), reply) is False
+            assert await bot.dispatch_bots_channel(_channel_message("!bots", channel_idx=99), reply) is False
+            assert await bot.dispatch_bots_channel(_channel_message("!bots", channel_idx=idx), reply) is True
+            # Second roll call inside the same window: dropped in silence.
+            assert await bot.dispatch_bots_channel(_channel_message("!bots", channel_idx=idx), reply) is False
+            if bot._background_tasks:
+                await asyncio.gather(*bot._background_tasks)
+
+
 class _GatedReplies:
     """Collects replies, holding the first one open.
 

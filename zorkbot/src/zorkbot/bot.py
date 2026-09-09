@@ -206,17 +206,22 @@ class ZorkBot:
                     notify_watchers_session_ended(watcher_sender, record),
                 )
 
-    async def dispatch_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
-        """Handle a message from the #zork channel."""
+    async def dispatch_channel(self, message: IncomingMessage, reply: ReplyFunc) -> bool:
+        """Handle a message from the #zork channel.
+
+        Returns True when the bot answered — a channel is shared with
+        conversation the bot has no part in, so the caller uses this to tell
+        traffic it served from traffic it merely overheard.
+        """
         if not channel_matches(message.channel_idx, self.config.channel):
             logger.debug("ignoring message on channel %s", message.channel_idx)
-            return
+            return False
 
         rest, _mentioned = strip_address(message.text.strip(), self.name)
         args = parse_command(rest)
         if args is None:
             logger.debug("ignoring non-command message: %r", message.text)
-            return
+            return False
 
         command, _, rest_args = args.partition(" ")
         command = command.lower()
@@ -231,7 +236,7 @@ class ZorkBot:
                 reject_reason="not_in_lobby",
             )
             await reply("Send !start and then DM me to play.")
-            return
+            return True
 
         ctx = Context(
             message=message,
@@ -239,29 +244,32 @@ class ZorkBot:
             _reply=reply,
             config=self.config,
         )
-        self._enqueue(ctx, command, rest_args)
+        return self._enqueue(ctx, command, rest_args)
 
-    async def dispatch_bots_channel(self, message: IncomingMessage, reply: ReplyFunc) -> None:
+    async def dispatch_bots_channel(self, message: IncomingMessage, reply: ReplyFunc) -> bool:
         """Handle a message from the dedicated bots-discovery channel.
 
         Only !bots is recognized here — everything else is ignored, since
         this channel is for mesh bot roll-calls, not the game lobby. Inert
         unless bots_enabled and a [bots_channel] are both configured.
+
+        Returns True when the roll call was answered, on the same terms as
+        `dispatch_channel`.
         """
         if not self.config.bots_enabled or self.config.bots_channel is None:
-            return
+            return False
         if not channel_matches(message.channel_idx, self.config.bots_channel):
-            return
+            return False
 
         rest, _mentioned = strip_address(message.text.strip(), self.name)
         args = parse_command(rest)
         if args is None:
-            return
+            return False
 
         command, _, _rest_args = args.partition(" ")
         command = command.lower()
         if command != "bots":
-            return
+            return False
 
         # Roll calls are answered at most once per window, for the channel as a
         # whole. Extra requests are dropped in silence — see Cooldown.
@@ -277,7 +285,7 @@ class ZorkBot:
                 accepted=False,
                 reject_reason="bots_cooldown",
             )
-            return
+            return False
 
         self._sink.command(
             pubkey_prefix=message.pubkey_prefix,
@@ -293,6 +301,7 @@ class ZorkBot:
             config=self.config,
         )
         self._spawn(handle_bots(ctx))
+        return True
 
     async def dispatch_dm(self, message: IncomingMessage, reply: ReplyFunc) -> None:
         """Handle a direct message."""
@@ -342,7 +351,12 @@ class ZorkBot:
             reject_reason=reason,
         )
 
-    def _enqueue(self, ctx: Context, command: str, rest_args: str) -> None:
+    def _enqueue(self, ctx: Context, command: str, rest_args: str) -> bool:
+        """Queue one command for this player's worker.
+
+        Returns False when the command was dropped instead — the bot stays
+        silent on those paths, so nothing was answered.
+        """
         player_id = ctx.pubkey_prefix or "anon"
 
         # Drop whatever arrives while this player's previous response is still
@@ -353,7 +367,7 @@ class ZorkBot:
         worker = self._workers.get(player_id)
         if worker is not None and not worker.done() and command not in _INTERRUPT_COMMANDS:
             self._drop(ctx, command, "response_pending")
-            return
+            return False
 
         if player_id not in self._queues:
             # Depth 1: the worker holds the command being answered, leaving room
@@ -366,13 +380,14 @@ class ZorkBot:
         except asyncio.QueueFull:
             # An interrupt is already waiting behind the in-flight response.
             self._drop(ctx, command, "queue_full")
-            return
+            return False
 
         if player_id not in self._workers or self._workers[player_id].done():
             self._workers[player_id] = asyncio.create_task(
                 self._run_worker(player_id),
                 name=f"zorkbot-worker-{player_id[:8]}",
             )
+        return True
 
     def _spawn(self, coro, *, returns: bool = True) -> None:
         """Run coro as a fire-and-forget task, not blocking the caller's

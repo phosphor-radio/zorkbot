@@ -557,6 +557,19 @@ function renderLineChart(container, series) {
   container.innerHTML = `<div class="legend">${legend}</div>${svg}`;
 }
 
+// DM and channel as two series rather than a transport picker: the split is
+// the interesting part of the shape, and one line at a time hides it. Order
+// fixes the colours — DM is series-a (blue), channel series-b (red).
+async function messageSeries(qs, direction) {
+  const series = [];
+  for (const [transport, name] of [["dm", "DM"], ["channel", "Channel"]]) {
+    const resp = await api(`/stats/messages?${qs}&direction=${direction}&transport=${transport}`);
+    const data = await resp.json();
+    series.push({ name, points: data.map((d) => ({ t: d.t, v: d.count })) });
+  }
+  return series;
+}
+
 async function loadCharts() {
   const rangeSeconds = currentRangeSeconds();
   const bucket = bucketForRange(rangeSeconds);
@@ -572,19 +585,8 @@ async function loadCharts() {
       { name: "Ended", points: sessData.map((d) => ({ t: d.t, v: d.ended })) },
     ]);
 
-    const rxTransport = document.querySelector("input[name='rx-transport']:checked").value;
-    const rxResp = await api(`/stats/messages?${qs}&direction=rx&transport=${rxTransport}`);
-    const rxData = await rxResp.json();
-    renderLineChart(document.getElementById("chart-rx"), [
-      { name: "Messages received", points: rxData.map((d) => ({ t: d.t, v: d.count })) },
-    ]);
-
-    const txTransport = document.querySelector("input[name='tx-transport']:checked").value;
-    const txResp = await api(`/stats/messages?${qs}&direction=tx&transport=${txTransport}`);
-    const txData = await txResp.json();
-    renderLineChart(document.getElementById("chart-tx"), [
-      { name: "Messages sent", points: txData.map((d) => ({ t: d.t, v: d.count })) },
-    ]);
+    renderLineChart(document.getElementById("chart-rx"), await messageSeries(qs, "rx"));
+    renderLineChart(document.getElementById("chart-tx"), await messageSeries(qs, "tx"));
 
     const delResp = await api(`/stats/delivery?${qs}`);
     const delData = await delResp.json();
@@ -602,9 +604,6 @@ async function loadCharts() {
 }
 
 document.getElementById("chart-range").addEventListener("change", loadCharts);
-for (const input of document.querySelectorAll("input[name='rx-transport'], input[name='tx-transport']")) {
-  input.addEventListener("change", loadCharts);
-}
 
 // ---------------------------------------------------------------------
 // Radio. Node state, channels and contacts, plus the recent-message windows
