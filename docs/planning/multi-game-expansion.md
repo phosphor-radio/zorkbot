@@ -1,9 +1,9 @@
 # Multi-Game Bot — Expansion Plan
 
-**Status:** Proposed (Revision 4)
+**Status:** Proposed (Revision 5)
 **Created:** 2026-08-30
-**Revised:** 2026-09-06 — re-review against a week of shipped work (DM delivery ACKs and retry, the
-admin web UI, airtime tightening, the pending-response gate); see [Revision history](#revision-history)
+**Revised:** 2026-09-09 — third game type: **channel games**, played in the open channel by anyone
+present; see [Revision history](#revision-history)
 **Builds on:** [`docs/specs/dm-sessions.md`](../specs/dm-sessions.md),
 [`docs/specs/dm-ack-retry.md`](../specs/dm-ack-retry.md),
 [`docs/specs/admin-web-ui.md`](../specs/admin-web-ui.md), current `zorkbot` architecture
@@ -11,25 +11,45 @@ admin web UI, airtime tightening, the pending-response gate); see [Revision hist
 ## Summary
 
 Generalize zorkbot from a single-game (Zork) mesh bot into a **game bot** that can host any
-number of games, each running in its own Docker container behind a common HTTP contract. Players
-request a game session from a lobby channel and play it out over DMs, exactly as today. The new
-piece is **multiplayer**: a game may need two or more players, matched up through a shared
-channel before play starts.
+number of games, each running in its own Docker container behind a common HTTP contract.
+
+Three **venues**, in increasing distance from what the bot does today:
+
+| Venue | Who plays | How it starts | Where play happens |
+|---|---|---|---|
+| **DM single-player** | one player vs. the engine | `!start` | DM (today's behaviour) |
+| **DM multiplayer** | a known roster, 2+ players | `!new` / `!join` matchmaking | DM, bot relaying between participants |
+| **Channel** | anyone on the channel, no roster | `!play`, by anyone | the channel itself, in the open |
+
+Venue is the axis that matters, because it decides identity, delivery guarantees, airtime cost, and
+session cardinality — and those four decide almost everything else in this document. A channel game
+is not "multiplayer with more players": it is a different trust and cost model, and rev 5 exists
+because designing it in after the DM work would force the contract open a second time.
 
 ## Goals
 
 - Support N game types, each isolated in its own container/process, added without touching bot
   core logic.
-- Support single-player games (vs. engine) and multiplayer games (player vs. player), both played
-  entirely through DMs with the bot as relay.
+- Support all three venues above behind one engine contract, with the bot ignorant of game rules
+  in every case.
 - One matchmaking flow, usable by any multiplayer game, for creating and joining a pending game.
-- Preserve existing session discipline: one active game (playing or pending-lobby) per player,
-  idle timeout + save/resume, watcher fan-out on the lobby channel.
+- One open-participation flow for channel games: a single active channel game, startable by anyone,
+  needing no join step and no roster.
+- Preserve existing session discipline for DM play: one active game (playing or pending-lobby) per
+  player, idle timeout + save/resume, watcher fan-out on the lobby channel. Channel participation is
+  deliberately outside that discipline — see [Channel games](#channel-games-new-in-rev-5).
 - Stay within the mesh's RF airtime budget as concurrency grows (see [RF budget](#rf-budget-and-concurrency)).
 
 ## Non-Goals (v1)
 
-- Real-time/simultaneous-turn games (everything is turn-based, synchronous request/response).
+- Real-time games. Everything stays turn-based and the engine contract stays synchronous
+  request/response — the bot always initiates. A channel game's timed answer window is a
+  *simultaneous-submission* round, not real time: the bot collects, closes the window, and makes one
+  ordinary call ([Rounds](#rounds-collecting-many-answers-at-once-rev-5)). The engine never pushes.
+- Verified identity on channel games. Channel senders cannot be authenticated with the transport as
+  it exists ([C1](#channel-games-rev-5)); channel games are designed to be worth playing anyway
+  rather than pretending otherwise.
+- Persistent cross-game leaderboards. Channel scores live and die with the session.
 - Cross-game spectating beyond the existing single-session watch model.
 - Public matchmaking across meshes/servers — one bot instance, one mesh.
 - Untrusted third-party engines. v1 assumes engines are operator-reviewed code running in the
@@ -40,10 +60,34 @@ channel before play starts.
 
 ## Decisions this revision surfaces
 
-Rev 4 is a re-read against the codebase as of `f031e0a` — a week, two dozen commits and eleven
+Open calls, newest first. Each is cheap to settle now and expensive to settle after
+`docs/specs/game-engine-api.md` is published, because each one shapes the contract.
+
+Rev 5's C-series comes first because it constrains the design; rev 4's D-series is drift against
+shipped code, and none of it invalidates the shape of the plan — it changes numbers, ordering, or a
+contract detail. Detail for the C-series is in [Channel games](#channel-games-new-in-rev-5); for
+the D-series, in the sections each row links to.
+
+### Channel games (rev 5)
+
+Adding a third venue raises its own set, and several of them contradict assumptions the DM design
+was resting on. Full discussion in [Channel games](#channel-games-new-in-rev-5).
+
+| # | Decision | Why it is live now | Recommendation |
+|---|---|---|---|
+| C1 | Can a channel player be **identified** at all? | `CHANNEL_MSG_RECV` carries no sender key material; `message_window.py` already records every channel rx as `sender_verified=False` | No, and the design must say so. Attribution is by typed name, spoofable by anyone on the channel. Scores stay in-session and are never written to the players table as fact |
+| C2 | How do many simultaneous answers reach the bot? | `_enqueue` keys on `pubkey_prefix or "anon"`, so unidentified senders share one worker and a **one-slot** queue | Channel submissions must bypass the per-player command queue entirely and go to a round collector, or a popular game silently drops most of the field |
+| C3 | Is **bare channel text** game input? | Bare channel text is ignored today, deliberately (`1a8bb78` counts it as overheard, not served) | Accept bare text only while a round window is open, only on the game channel. Everything else stays ignored |
+| C4 | Who owns the **answer timer**? | The contract is synchronous and "no engine → bot push" is a v1 non-goal | The bot. The engine asks for a window in its response; the bot collects and makes one batched call. The engine never initiates |
+| C5 | Does channel play consume a player's **one active session**? | "One active thing per player" is a load-bearing invariant of the DM design | No. Channel participation is not a session for the participant. State the exemption rather than discovering it |
+| C6 | Which **channel** does it run on? | The bot serves two channels; `482265a` moved `!bots` off `#zork` precisely because chatty features drown a lobby | Optional `[game_channel]`, defaulting to the lobby channel. A channel game is the chattiest feature yet proposed |
+| C7 | What bounds the **rx guard feedback loop**? | Every inbound answer re-arms `channel_rx_guard_seconds`, and a channel game deliberately provokes many | A hard deadline that overrides the guard. Otherwise the more players answer, the longer the bot cannot speak — popularity becomes the failure mode |
+| C8 | Which venue is built **first**? | Flagged as its own phase, independent of DM multiplayer, order TBD | Channel games. They exercise game-type routing, `/meta`, and terminal state with no matchmaking, no roster recovery, and no dependency on the unresolved [D1](#decisions-this-revision-surfaces) |
+
+### Drift against shipped code (rev 4)
+
+Rev 4 was a re-read against the codebase as of `f031e0a` — a week, two dozen commits and eleven
 merged PRs after rev 3.
-Nothing below invalidates the shape of the plan; all of it changes numbers, ordering, or a
-contract detail that is cheap now and expensive after `game-engine-api.md` is published.
 
 | # | Decision | Why it is live now | Recommendation |
 |---|---|---|---|
@@ -161,6 +205,7 @@ session ids are minted by the bot as `mp-<12 hex>`.
 {
   "game_type": "chess",
   "display_name": "Chess",
+  "venue": "dm",
   "min_players": 2,
   "max_players": 2,
   "max_command_bytes": 16,
@@ -169,6 +214,15 @@ session ids are minted by the bot as `mp-<12 hex>`.
   "rules": "..."
 }
 ```
+
+**`venue` (rev 5)** is `"dm"` or `"channel"`, and it is the field the bot routes the whole session
+lifecycle on: which command starts a game, whether there is a roster, whether `!watch` means
+anything, which send path output takes, and which cap it counts against. It is deliberately a
+separate axis from `min_players`/`max_players` — a channel game is not "a DM game with a large
+roster", and conflating the two produces a bot that tries to matchmake a quiz.
+
+For `venue: "channel"`, `max_players` is `null` (unbounded — whoever is on the channel) and
+`min_players` is 1. A channel engine MUST tolerate a round in which nobody answered.
 
 **`display_name` is not cosmetic (rev 4).** Twelve transmitted strings currently hardcode
 `"Zork I "` — in `session_state.py`, `watcher_notify.py`, `start.py`, `end.py`, `reset.py`,
@@ -207,6 +261,74 @@ synchronous — no inbound webhook into the bot for v1. (If a game later needs e
 pushes independent of a player action — a chess clock timeout — that's a deliberate v2 extension:
 an engine → bot notify endpoint, added only when a game actually needs it.)
 
+#### Rounds: collecting many answers at once (rev 5)
+
+A channel game's characteristic move is "bot asks, several people answer, bot judges". That is not
+request/response, and it is the one place where channel games push on the contract rather than
+merely reusing it. **The bot owns the timer** ([C4](#channel-games-rev-5)), which is what keeps the
+engine synchronous and keeps "no engine → bot push" intact as a v1 non-goal.
+
+An engine opens a window by returning a `collect` directive alongside its output:
+
+```json
+{
+  "ok": true,
+  "output": "Round 3: what is the capital of Peru? Answers in 30s.",
+  "collect": {"seconds": 30, "max_submissions": 20, "first_only": true}
+}
+```
+
+The bot posts `output` to the channel, buffers everything that arrives on the game channel for the
+window, closes it, and makes **one ordinary call** carrying the batch:
+
+```json
+{
+  "submissions": [
+    {"player_id": "a1b2c3d4e5f6", "name": "Alice", "verified": false, "text": "Lima", "at": 1757400012},
+    {"player_id": null, "name": "Bob", "verified": false, "text": "lima", "at": 1757400019}
+  ]
+}
+```
+
+Four things this shape is doing deliberately:
+
+- **`player_id` is nullable and `verified` is always present.** A channel submitter may not be
+  resolvable to any pubkey prefix at all, and when they are it is by typed name, not cryptography
+  ([C1](#channel-games-rev-5)). Engines get told, per submission, exactly how much the identity is
+  worth. An engine that wants to award a persistent prize can refuse to.
+- **`first_only`** lets a race game discard all but each submitter's first answer without the
+  engine implementing dedup, and without the bot knowing what makes an answer good.
+- **`max_submissions`** is a cap the bot enforces, not a promise the engine makes. It bounds both
+  memory and the size of the resulting call.
+- **Windows do not survive a restart.** `SessionState` is in-memory and the radio's offline backlog
+  is discarded at startup (`64e8c0d`), so a window open across a restart is gone along with every
+  answer sent into it. The engine must be able to reopen a round rather than assuming one is
+  pending — the same "engines are the source of truth" rule as
+  [Restart recovery](#restart-recovery-rev-2--was-a-correctness-bug), applied to rounds.
+
+The bot's scheduler for this is new work with no existing analogue: `_spawn` is fire-and-forget and
+the session poller is a fixed-interval loop, neither of which is a cancellable per-session deadline.
+
+#### Terminal state (rev 5)
+
+"Discrete win/loss conditions to end the game" means the engine must be able to say *the session is
+over* in a normal response, rather than the bot inferring it from a later `session_not_found`:
+
+```json
+{"ok": true, "output": "Alice wins, 7-4. Game over.", "ended": true, "reason": "win"}
+```
+
+`reason` is one of `win` | `draw` | `timeout` | `abandoned`, for the bot's session-history
+`end_reason` — it is not shown to players, because the human-readable version is already in
+`output`. On `ended: true` the bot tears down its own record, stops any open round window, and
+announces on the channel; it does not call `DELETE /sessions/{id}`, since the engine has already
+ended it.
+
+This field is not channel-specific, and rev 4 wanted it anyway: it is the clean answer to
+[abandonment semantics](#timeouts-and-abandonment-rev-2) for DM multiplayer, where "draw, forfeit,
+or resumable save" is a per-game question the engine is the only component qualified to answer.
+Channel games are what make it mandatory rather than nice to have.
+
 #### Delivery classes for engine-authored DMs
 
 **New in rev 4 (D1, D2).** When this plan was written every DM was fire-and-forget, so "the bot
@@ -218,9 +340,17 @@ has two distinct send paths with different costs and different guarantees
 |---|---|---|---|---|
 | `_send_dm` (player traffic) | yes | up to `dm_ack_max_attempts` (3) | `acked = 1/0` | 1–3 transmissions, lock held across every ACK window |
 | `_send_watcher_dm` (fan-out) | no | no | `acked = NULL` | 1 transmission |
+| `_send_chan_msg` (channel, rev 5) | **impossible** | no | `acked = NULL` | 1 transmission, plus it re-arms nobody's guard but its own spacing |
 
-`output` is unambiguous: it answers the player who acted, so it takes the player path, as today.
-`broadcasts` is the open question, and the answer is not "whichever is cheaper":
+The channel row is a hard constraint, not a policy choice: a channel message is a broadcast with no
+per-recipient ACK, which is why `_on_channel_msg`'s reply closure returns `True` unconditionally.
+Nothing about a channel game's output can be measured or retried, and `dm_ack_abandon_response`
+never applies to it. **A lost question is lost for every participant at once**, and the bot will not
+know. A channel engine should therefore be designed so that a missed round is recoverable — a
+re-ask on timeout with nobody answering, rather than a game that silently stalls.
+
+For DM venues, `output` is unambiguous: it answers the player who acted, so it takes the player
+path, as today. `broadcasts` is the open question, and the answer is not "whichever is cheaper":
 
 > **Recommendation: `broadcasts` are player traffic.** In a turn-based game the opponent's
 > broadcast is the *only* signal that it is their move. Losing it is not losing a fragment of
@@ -323,6 +453,22 @@ participant, all sharing the same `session_id`, so existing per-player lookups
 `active_state(player_id)` gains `"pending"` for a player who has created or joined a lobby entry
 whose game hasn't started — still counts toward "one active thing per player."
 
+**A channel game is a session with no owner (rev 5).** It gets one `SessionRecord` with
+`session_id = "ch-<12 hex>"`, `venue = "channel"`, and **no** `player_id` — the field that every
+lookup in `session_state.py` is currently keyed on. `_sessions: dict[str, SessionRecord]` cannot
+hold it, so channel games need their own slot in `SessionState` (there is at most one, which makes
+this a field rather than a dict) plus a `channel_session()` accessor. `get_session(player_id)`
+returning `None` for someone actively answering channel questions is correct, not a bug, and the
+call sites that treat `None` as "no active game" need to keep doing so.
+
+Consequently `active_state(player_id)` is **not** extended for channel play
+([C5](#channel-games-rev-5)). A player mid-Zork can answer a channel question; a channel
+participant can still `!start`. The two venues do not contend for the same slot, because channel
+participation is not a commitment the bot tracks per player — it is just someone typing in a
+channel. The one-active-thing-per-player rule keeps meaning exactly what it means today, and the
+temptation to "unify" it here should be resisted: it would make joining a quiz lock a player out of
+their own save.
+
 **One record per participant collides with the fan-out queue (rev 4).** `261dfb7` keys watcher
 fan-out on `session_num` — `bot._fanout_queues: dict[int, asyncio.Queue]`, one consumer task each —
 specifically so a session's watchers see its output in the order it happened. N records for one
@@ -410,13 +556,26 @@ CREATE TABLE sessions (
 CREATE UNIQUE INDEX idx_sessions_run_num ON sessions(bot_run_id, session_num);
 ```
 
-One `pubkey_prefix` column, and a uniqueness constraint on `(bot_run_id, session_num)`. The plan's
-"one `SessionRecord` per participant sharing a `session_id`" produces N rows with N `session_num`s
-for one game, which satisfies the index but records a 2-player chess game as two unrelated
-single-player sessions. Either the rows gain a `session_id` (and `game_type`) column so they can be
-grouped, or a `session_players` table takes the roster. **Decision D4.** Either way it is a
-migration: `_migrate()` exists now (schema v2, added by `671aa0f`), so the machinery is there, but
-`CREATE TABLE IF NOT EXISTS` will not add a column to a deployed DB.
+One `pubkey_prefix` column, `NOT NULL`, and a uniqueness constraint on `(bot_run_id,
+session_num)`. The plan's "one `SessionRecord` per participant sharing a `session_id`" produces N
+rows with N `session_num`s for one game, which satisfies the index but records a 2-player chess game
+as two unrelated single-player sessions. Either the rows gain a `session_id` (and `game_type`)
+column so they can be grouped, or a `session_players` table takes the roster. **Decision D4.**
+Either way it is a migration: `_migrate()` exists now (schema v2, added by `671aa0f`), so the
+machinery is there, but `CREATE TABLE IF NOT EXISTS` will not add a column to a deployed DB.
+
+**Rev 5 upgrades D4 from a cardinality problem to a nullability one.** A channel game has no owner
+and possibly no identified participant at any point in its life, so `pubkey_prefix TEXT NOT NULL
+REFERENCES players(pubkey_prefix)` cannot be satisfied at all — there is no plausible value, not
+even a bad one. That settles the design: `sessions` needs a nullable owner plus a `venue` column
+(`dm_single` | `dm_multi` | `channel`), with participants in their own table that a channel game
+simply leaves empty. Rows recording *unverified* channel submitters must not write to `players`
+either, so the participants table needs its own `verified` flag rather than a foreign key —
+otherwise a spoofed name would mint a player record ([C1](#channel-games-rev-5)).
+
+Same for the event vocabulary: `session_started(record)` assumes an owner, and `transcript(...)`
+assumes a `player_name` per line. A channel round is one prompt, many attributed-but-unverified
+submissions, and one result.
 
 Also game-specific, and each needing a game dimension: the `EventSink` protocol's
 `transcript(session_num, player_name, command, output)` — no notion of *which* participant, and
@@ -469,6 +628,123 @@ plus a `PendingGameRegistry` alongside `SessionState`.
    question the engine cannot answer, even though the *outcome* (draw/forfeit/save) is the
    engine's.
 
+### Channel games (new in rev 5)
+
+A channel game is played in the open, on the channel, by whoever is there. There is no join step,
+no roster, and no DM leg at all: the bot posts a problem, people answer in the channel, the bot
+posts the result. Exactly one may be active at a time, bot-wide.
+
+Everything below follows from three facts about the channel transport that do not apply to DMs, and
+each of them is already written down in the codebase rather than being a prediction.
+
+#### 1. Nobody on a channel is identified
+
+`CHANNEL_MSG_RECV` carries no sender key material. `_build_channel_message` recovers a name by
+partitioning the body on `"Name: text"` — the convention companion apps use — and then looks that
+name up in the contact table to get a `pubkey_prefix`. `message_window.py` states the consequence
+plainly, and already models it:
+
+> Channel senders are unverified by construction: `CHANNEL_MSG_RECV` has no sender field, so
+> `sender_name` came from the "Name: text" convention in the message body and anyone on the channel
+> can type anyone's name.
+
+So a channel game's scoreboard is built on names anyone can claim, and on prefixes that are absent
+entirely for anyone the radio has not heard an advert from. This is not fixable at this layer — it
+is a property of the transport, and the [Identity](#identity) section's "not spoofable over the
+air" has always been a claim about DMs.
+
+**The design response is to make it not matter** ([C1](#channel-games-rev-5)):
+
+- Scores are per-session and ephemeral. They are never written to the admin `players` table, never
+  aggregated across games, and never presented as a record of who is good at anything.
+- Every submission handed to an engine carries `verified: false`, so an engine that wants stakes
+  can decline to award them, or can require confirmation.
+- The escape hatch, if a game ever genuinely needs stakes: the bot DMs the claimed winner and only
+  a reply *from that DM* confirms — a DM is authenticated. That costs one ACK-waited exchange per
+  award, which is why it is an escape hatch and not the default.
+- Trivia, collaborative puzzles, and "first correct answer wins bragging rights" are all
+  perfectly good games on unverified identity. A ladder with prizes is not. The contract should say
+  which of those a `venue: "channel"` engine is allowed to be.
+
+#### 2. Many people answer at once, and the command path cannot take it
+
+`bot._enqueue` opens with:
+
+```python
+player_id = ctx.pubkey_prefix or "anon"
+```
+
+Every unidentified channel sender therefore shares the single key `"anon"`: one worker task, and one
+`asyncio.Queue(maxsize=1)`. During a round, the second answer to arrive is dropped as
+`response_pending` and the third as `queue_full` — **silently**, because both drop paths deliberately
+send nothing back. A twenty-player quiz would score the first answer and discard the rest, and
+nothing in the logs would look like an error.
+
+The gate is right for what it was built for (one in-flight response per player) and simply does not
+describe a channel round, where the bot answers *the channel* once for many inbound messages.
+So ([C2](#channel-games-rev-5)):
+
+- **Channel-game submissions never enter the per-player command queue.** `dispatch_channel` routes
+  them to the active round collector and returns; there is no per-submission response to gate on.
+- The collector enforces its own bounds — `max_submissions`, and `first_only` dedup keyed on
+  `(pubkey_prefix or name)`.
+- Lobby commands (`!play`, `!scores`, `!end`) keep going through the normal path, so the existing
+  gate still protects the bot from someone spamming `!play`.
+
+This also means a channel round's cost is **one** bot response for N inbound messages, which is the
+one respect in which channel games are cheaper than everything else here.
+
+#### 3. Bare channel text is currently ignored on purpose
+
+`parse_command` returns `None` for anything not starting with `!`, and `dispatch_channel` logs
+`"ignoring non-command message"` and returns `False`. `1a8bb78` leaned on exactly this when it
+stopped counting overheard chatter as bot load.
+
+A Q&A game wants bare answers — making players type `!answer Lima` is friction on the core loop.
+But accepting bare channel text unconditionally turns the bot into a participant in every
+conversation on the channel. The bound ([C3](#channel-games-rev-5)):
+
+> Bare channel text is game input **only while a round window is open**, and **only** on the
+> configured game channel. With no window open, the current behaviour is unchanged: ignored,
+> unanswered, uncounted.
+
+A round window is short (tens of seconds) and always announced by the bot immediately before, so
+the interval in which ordinary conversation could be mistaken for an answer is both brief and
+visibly signposted. Submissions still count as served traffic for `_count_rx` — the bot did act on
+them — which is a deliberate departure from "counted only when the bot answered", since here the bot
+answers once for the whole batch.
+
+#### Lifecycle and commands
+
+- `!play <game>` — start the channel game. Anyone may. Refused, with a channel reply, if a channel
+  game is already active; rate-limited by a `Cooldown` so a burst of `!play` draws one answer for
+  the channel, exactly as `!bots` does.
+- `!scores` — current standing, if the engine offers one (from `/meta` or the last response).
+- `!end` — **admin only**, unlike the DM venues. The usual "creator or admin" rule cannot work when
+  the creator is an unverified name; anyone could claim to be them. The game otherwise ends on its
+  own terms: `ended: true` from the engine, or the idle timeout.
+- `!watch` — refused for channel games. Everyone on the channel already sees everything, so a
+  watcher subscription would fan the same text out a second time by DM, at ACK-waited cost, for no
+  information gain.
+- `!list` — shows the channel game as a distinct kind, with no owner.
+
+Between rounds the game is idle and the channel is quiet; the engine's inactivity timer ends it the
+same way it ends a DM session, and the bot announces that on the channel rather than DMing anyone.
+
+#### Which channel
+
+`!bots` was moved off `#zork` in `482265a` because a chatty, broadcast-shaped feature drowns a
+lobby that people also need for `!start` and `!list`. A channel game is chattier than `!bots` by an
+order of magnitude — a question, N answers, and a result, per round, for the length of a game.
+
+So: an optional `[game_channel]`, defaulting to the lobby channel when unset
+([C6](#channel-games-rev-5)). Operators on a mesh with spare channel slots separate them; operators
+without accept the noise. This is one more served channel in `runner.start()`'s subscription set and
+one more reserved window in `MessageWindows`, both of which already take a set rather than a single
+value. Note that the admin UI's channel editor deliberately refuses to touch the bot's served
+channels (`admin-radio-edit.md`, "The served channels are not editable here"), so adding a game
+channel stays a config-and-restart operation.
+
 ---
 
 ## Security model
@@ -500,6 +776,11 @@ compromised engine turns the bot into an RF spam relay aimed at arbitrary mesh n
 
 - Drop any broadcast whose `player_id` is not a participant in that session.
 - Cap the array at the session's roster size, and drop duplicates.
+- **For a channel game there is no roster to check against** (rev 5), so the rule becomes: the only
+  legal broadcast targets are `player_id`s the bot itself supplied in that round's `submissions`,
+  and only until the next round opens. Without this, "no roster" would read as "no restriction" and
+  a channel engine could name any node on the mesh — the exact spam-relay this section exists to
+  prevent, with the one check that stops it silently disabled by the new venue.
 - Cap per-broadcast text at `max_engine_text_bytes` (default ~1200, i.e. 10 packets) and truncate
   rather than reject, so a runaway engine degrades instead of breaking play. Bytes, not characters
   — see [D3](#decisions-this-revision-surfaces); truncation must also not split a UTF-8 sequence.
@@ -515,11 +796,33 @@ impersonate a bot command in a player's DM view.
 
 ### Identity
 
-`player_id` remains the MeshCore `pubkey_prefix` — cryptographically derived and not spoofable
-over the air. Multiplayer raises the stakes of a *collision* (two nodes sharing a 6-byte prefix)
-from "you corrupt your own save" to "you are seated in someone else's game." At 2⁴⁸ this is not a
-practical concern for a single mesh, but the bot should log and refuse a `!join` if the joining
-prefix already matches a participant.
+**In DMs**, `player_id` is the MeshCore `pubkey_prefix` — cryptographically derived and not
+spoofable over the air. Multiplayer raises the stakes of a *collision* (two nodes sharing a 6-byte
+prefix) from "you corrupt your own save" to "you are seated in someone else's game." At 2⁴⁸ this is
+not a practical concern for a single mesh, but the bot should log and refuse a `!join` if the
+joining prefix already matches a participant.
+
+**On a channel, none of that holds** (rev 5 — [C1](#channel-games-rev-5)). This section previously
+said "not spoofable over the air" without qualification, which was true of the only venue that
+existed. `CHANNEL_MSG_RECV` has no sender field: the name comes from the message body and the
+prefix from a contact-table lookup on that name, so channel attribution is a claim, not a proof.
+The codebase already encodes the distinction — `MessageWindows.record_rx` sets
+`sender_verified = (transport == "dm")` — and the game layer should use the same flag rather than
+inventing a second notion of it.
+
+Three rules follow, and they are the whole of the channel-game threat model:
+
+- **No authority is granted on channel identity.** Admin commands stay DM-only or pubkey-gated;
+  `!end` on a channel game is admin-only for exactly this reason. Nothing a channel message claims
+  can escalate.
+- **Nothing durable is written from it.** Channel scores never reach the `players` table and never
+  outlive the session. A spoofed win costs a spoofed bragging right, and nothing else.
+- **Engines are told.** `verified: false` rides on every submission, so the trust decision is made
+  by the component that knows what the game is worth.
+
+The residual risk is griefing — answering as someone else, or flooding a round with noise — which
+is bounded by `max_submissions`, `first_only`, and the fact that the whole channel can see it
+happening. That is the same social enforcement any open channel already relies on.
 
 ---
 
@@ -548,11 +851,40 @@ So the cost of a packet depends on which class it is:
 | `broadcasts` (opponents), if player-class per [D1](#delivery-classes-for-engine-authored-dms) | 1–3 each | same | × (roster − 1) |
 | watcher fan-out | 1 | ~2s | × watchers × N packets |
 | channel announcement (matchmaking) | 1 | ~2s, plus a re-armed 2s rx guard | per `!new`/`!join`/`!cancel`/expiry |
+| channel game output (rev 5) | 1, never retried | ~2s | 1 question + 1 result per round, **regardless of player count** |
 
 The worst case is a full multiplayer roster where every participant is at the edge of range: each
 turn produces roster-many ACK-waited multi-packet sends, any of which can hold the single global
 lock for its full retry sequence. At the game service's default `MAX_ACTIVE_SESSIONS=8`, a stack of
 multiplayer games with watchers overruns the 64-deep queue and starves every other player.
+
+**Channel games invert the shape of the problem (rev 5).** On outbound traffic they are by far the
+cheapest venue: one broadcast reaches every participant, so cost is flat in player count where DM
+multiplayer is linear in it, and none of it is ACK-waited. A 20-player quiz round costs two
+transmissions. The same round in DM multiplayer would cost forty, each retryable.
+
+The cost lands on *inbound* traffic instead, and it lands somewhere the bot has no throttle for
+([C7](#channel-games-rev-5)). `channel_rx_guard_seconds` holds transmission for 2s after any
+channel message arrives, and `_wait_for_quiet_air` re-checks after every sleep, deliberately
+re-arming when a message lands mid-wait:
+
+> The guard is deliberately not scoped to the reply for one particular message: the mesh is busy
+> repeating the flood regardless of which of the bot's packets is next in line.
+
+That is correct for a lobby, where inbound channel traffic is sporadic. A channel game *solicits*
+inbound floods — that is the game — so a round with answers trickling in over its whole window
+keeps re-arming the guard and the bot cannot transmit for the duration. The round-close
+announcement is then delayed by exactly the stragglers it is waiting on, and, because the send gate
+is global, so is every DM player's reply. **Popularity becomes the failure mode**: the better the
+game does, the longer the bot is muzzled, and DM sessions on the same bot pay for it.
+
+Mitigation: a hard deadline that overrides the guard for the round-close transmission — the bot
+accepts one collision-prone packet rather than deferring indefinitely — plus counting a channel
+game's expected inbound rate against the same admission decision as everything else. This is worth
+measuring on the live deployment before the first channel engine ships, and it is the strongest
+argument for `[game_channel]` being separate from the lobby: the guard is armed per received
+message regardless of channel, so quiz traffic delays lobby replies either way, but a separate
+channel at least makes the two legible in the stats.
 
 Mitigations, all of which belong in v1:
 
@@ -587,6 +919,17 @@ Mitigations, all of which belong in v1:
 max_active_sessions = 8
 max_engine_text_bytes = 1200      # bytes, not characters - see the /meta notes
 max_packets_per_turn = 12
+
+# Channel games (rev 5). One may be active bot-wide.
+channel_games_enabled = false
+channel_round_max_seconds = 60    # ceiling on an engine's requested collect window
+channel_round_max_submissions = 20
+channel_game_start_cooldown_seconds = 30   # global, mirrors bots_cooldown_seconds
+
+# Optional dedicated channel for channel games; defaults to [channel] when unset.
+# [game_channel]
+# index = 3
+# name = "#quiz"
 
 [[games]]
 name = "zork"
@@ -749,13 +1092,37 @@ starting, for a clean rollback point without the overhead of two live repos.
    `[[games]]`; extend `_reconcile_sessions` to run at startup and across every engine, and to
    re-add records rather than only remove them; add the global session cap and broadcast/output
    validation (dormant until a game emits broadcasts).
-5. **Matchmaking.** `PendingGameRegistry`, `!games`/`!new`/`!join`/`!cancel`, pending expiry,
+5. **Channel games (rev 5).** `venue` routing, the channel session record, the round collector and
+   its timer, bare-text-while-open, `!play`/`!scores`, admin-only `!end`, the roster-less broadcast
+   rule, and the optional `[game_channel]`. Ships with a trivia or quiz engine, because a channel
+   game with no engine is untestable.
+6. **Matchmaking.** `PendingGameRegistry`, `!games`/`!new`/`!join`/`!cancel`, pending expiry,
    announcement cooldowns, multi-participant timeout notification, multiplayer `!end` semantics.
-6. **Second game.** Build `engines/<game>/` as the first real multiplayer engine, proving the
-   contract end-to-end.
+7. **Second DM game.** Build `engines/<game>/` as the first real multiplayer engine, proving the
+   DM-multiplayer half of the contract end-to-end.
 
 Phases 0–4 are shippable one at a time against the existing single-game deployment, each with no
 user-visible change — which is what makes this safe to do on a live bot.
+
+**Why channel games before DM multiplayer ([C8](#channel-games-rev-5)).** The two are independent
+after phase 4 and could go in either order; this is a recommendation, not a constraint.
+
+- Channel games need **no matchmaking**: no `PendingGameRegistry`, no `!new`/`!join`/`!cancel`, no
+  pending-expiry, no recovery of pending lobby entries across a restart. That is the single largest
+  block of new machinery in this plan, and channel games skip all of it.
+- They are **not blocked on [D1](#decisions-this-revision-surfaces)**, the unresolved question of
+  whether ACK-waited broadcasts are affordable. Channel output cannot be ACKed at all, so the
+  question does not arise.
+- They exercise the parts of the contract that everything else depends on — `venue` routing,
+  `/meta`, terminal state, the registry, output sanitization, the global cap — and they do it with a
+  quiz engine, which is perhaps a tenth the work of a real multiplayer engine.
+- They surface the RF question earlier and more cheaply: the rx-guard feedback loop
+  ([C7](#channel-games-rev-5)) is measurable with one engine and a willing channel.
+
+The cost of this order is that channel games force the identity and `"anon"`-collapse work
+([C1](#channel-games-rev-5), [C2](#channel-games-rev-5)) up front, which DM multiplayer would not
+have needed. That is a bounded, well-understood change to `_enqueue`'s routing, against an
+unbounded one to the lobby.
 
 ## Open questions
 
@@ -776,6 +1143,20 @@ Answered or reframed in rev 4:
   ACK-waited *broadcasts* are affordable ([D1](#decisions-this-revision-surfaces)) — answerable from
   the live delivery stats, which is why phase 0 exists.
 
+New in rev 5 (channel games):
+
+- Does a channel game count against `max_active_sessions` at all? Its outbound cost is flat and
+  small; its inbound cost is the thing worth bounding, and no existing knob measures that.
+- Should a round window be **extendable** when answers are still arriving at the deadline, or is a
+  hard close the only safe rule given [C7](#channel-games-rev-5)? Hard close is assumed above.
+- What happens to a round window when the engine becomes unreachable mid-round — void the round,
+  or hold the submissions and retry the batched call once?
+- Should `!play` be startable from a DM (bot then posts to the channel), so the lobby is not
+  spammed by failed starts? It would also give the starter a verified identity, which is the one
+  place a channel game could cheaply have one.
+- Do channel games need any per-sender abuse control beyond `first_only` and `max_submissions` —
+  and can one exist at all, given that the abusive sender cannot be identified?
+
 New in rev 4:
 
 - Should the bot cap concurrent multiplayer sessions by *roster size* rather than session count? A
@@ -790,6 +1171,43 @@ New in rev 4:
 ---
 
 ## Revision history
+
+**Rev 5 (2026-09-09)** — third venue: **channel games**, played in the open channel by anyone
+present, with no join step and no roster. Considered now rather than after the DM work because it
+changes the contract, the session model, the security model and the admin schema, and each of those
+would have to be reopened otherwise. Changes:
+
+- Reframed the plan around three **venues** (DM single-player, DM multiplayer, channel) rather than
+  a player-count axis, and added `venue` to `/meta` as the field the bot routes the session
+  lifecycle on.
+- Added [Channel games](#channel-games-new-in-rev-5), built on three transport facts already
+  recorded in the codebase: channel senders are unverified by construction
+  (`message_window.py`'s `sender_verified`), `_enqueue` collapses every unidentified sender onto a
+  single `"anon"` worker with a one-slot queue, and bare channel text is deliberately ignored
+  (`1a8bb78`).
+- Added decisions C1–C8. C1 (identity is unverifiable on a channel) and C2 (the `"anon"` collapse
+  would silently drop most of a round's answers) are the two that constrain the design rather than
+  merely colouring it.
+- Added [Rounds](#rounds-collecting-many-answers-at-once-rev-5): the bot owns the answer timer and
+  hands the engine one batched `submissions` call, which keeps the contract synchronous and keeps
+  "no engine → bot push" a v1 non-goal. Each submission carries `verified: false`.
+- Added [Terminal state](#terminal-state-rev-5) (`ended` + `reason`), which channel games make
+  mandatory and which is also the clean answer to rev 2's open question on DM-multiplayer
+  abandonment semantics.
+- Scoped the [Identity](#identity) section's "not spoofable over the air" to DMs, where it was
+  always the only true reading, and wrote down the resulting channel-game threat model.
+- Broadcast validation: a channel game has no roster, so the "must be a participant" rule is
+  replaced by "must be an id the bot supplied in this round's submissions" — otherwise the new
+  venue silently disables the check that stops the bot being an RF spam relay.
+- RF budget: channel games are the cheapest venue outbound (flat in player count, never retried)
+  and introduce a new inbound failure mode — every answer re-arms `channel_rx_guard_seconds`, so a
+  popular round can muzzle the whole bot, DM players included, for its full duration.
+- Admin schema: D4 upgrades from cardinality to nullability. `sessions.pubkey_prefix` is `NOT NULL`
+  and a channel game has no owner, so the column cannot be satisfied by any value.
+- Session model: a channel game is one ownerless `SessionRecord` outside `_sessions`, and channel
+  participation deliberately does **not** consume a player's one-active-session slot.
+- Migration plan is now phases 0–7, with channel games at 5 and a stated recommendation to build
+  them before DM multiplayer.
 
 **Rev 4 (2026-09-06)** — re-review against `f031e0a`, after eight merges the plan predates. The
 architecture is unchanged; the operating environment around it is not. Changes:
